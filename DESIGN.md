@@ -1,6 +1,6 @@
 # DESIGN.md: Chamera Brand Guide
 
-Sumber: *Chamera Brand Guide* (HTML). File ini adalah versi yang bisa dibaca agen. Pakai sebagai acuan untuk **semua UI** (kiosk, dashboard admin, halaman download), **teks bawaan**, dan **desain frame**.
+ File ini adalah versi yang bisa dibaca agen. Pakai sebagai acuan untuk **semua UI** (kiosk, dashboard admin, halaman download), **teks bawaan**, dan **desain frame**.
 
 > Catatan dari guide asli: arah visual adalah asumsi awal. Bila ingin versi modern-clean, palet dan tipografi bisa disesuaikan.
 >
