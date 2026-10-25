@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chamera Brand Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,500;1,9..144,700&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--cherry:#D62839;--cream:#FFF4E3;--rose:#F2B8C0;--char:#26211F;--butter:#F6D98B;--sky:#A9C9E8;
+--bg:#FFF4E3;--fg:#26211F;--card:#FFFFFF;--line:#E9D9C0;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1E1A18;--fg:#FFF4E3;--card:#2A2523;--line:#403834}}
+:root[data-theme="dark"]{--bg:#1E1A18;--fg:#FFF4E3;--card:#2A2523;--line:#403834}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.6 Nunito,system-ui,sans-serif}
+h1,h2,h3{font-family:Fraunces,Georgia,serif;margin:0;line-height:1.15}
+h2{font-size:clamp(26px,5vw,38px);font-style:italic;font-weight:600}
+h3{font-size:19px}
+p{margin:.4em 0}
+section{max-width:960px;margin:0 auto;padding:44px 20px;border-top:1.5px dashed var(--line)}
+.hero{background:var(--cherry);color:var(--cream);text-align:center;padding:56px 20px 48px;border:0;max-width:none}
+.hero svg{width:min(92%,420px);height:auto}
+.hero p{font-family:Fraunces,Georgia,serif;font-style:italic;font-size:clamp(18px,3.5vw,24px);margin-top:12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:20px}
+.card{background:var(--card);border-radius:18px;padding:18px;border:1px solid var(--line)}
+.sw{border-radius:18px;overflow:hidden;border:1px solid var(--line);background:var(--card);cursor:pointer;text-align:left;padding:0;font:inherit;color:inherit}
+.sw i{display:block;height:92px}
+.sw div{padding:10px 14px 12px;font-size:14px}
+.sw b{font-family:Fraunces,Georgia,serif;font-size:17px;display:block}
+.sw small{display:block;opacity:.75}
+.lg{display:grid;place-items:center;height:150px;border-radius:18px;padding:14px}
+.lg svg{max-width:100%;height:100%}
+.cap{font-size:13px;opacity:.75;margin-top:6px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:480px;font-size:15px}
+td,th{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.strip{display:flex;flex-direction:column;gap:8px;background:var(--cream);padding:14px 14px 22px;width:130px;border:2px solid var(--char);color:var(--char);text-align:center;font:italic 600 13px Fraunces,Georgia,serif;box-shadow:6px 6px 0 var(--cherry)}
+.strip span{display:block;height:84px;border-radius:2px}
+.mock{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-end;margin-top:22px}
+.ig{width:220px;aspect-ratio:1;background:var(--rose);border-radius:14px;display:grid;place-items:center;text-align:center;padding:18px;color:var(--char);font:italic 700 26px/1.1 Fraunces,Georgia,serif}
+.ig small{display:block;font:600 12px Nunito,sans-serif;margin-top:10px;color:var(--cherry)}
+.box{width:200px;height:150px;background:var(--cherry);border-radius:10px;display:grid;place-items:center;color:var(--cream);position:relative;box-shadow:0 8px 0 #A81E2D}
+.box:after{content:"";position:absolute;inset:10px;border:1.5px dashed var(--rose);border-radius:6px}
+.box svg{width:120px;position:relative;z-index:1}
+.do{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.yes{border-left:6px solid var(--cherry)}.no{border-left:6px solid var(--sky)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--char);color:var(--cream);padding:8px 18px;border-radius:99px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+footer{text-align:center;padding:30px 20px 50px;font:italic 500 16px Fraunces,Georgia,serif}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<!-- Ikon: charm dengan jump ring + lensa kamera + titik flash + hati -->
+<symbol id="icon" viewBox="0 0 100 124">
+<circle cx="50" cy="15" r="11" fill="none" stroke="var(--a)" stroke-width="5"/>
+<circle cx="50" cy="76" r="44" fill="var(--a)"/>
+<circle cx="50" cy="76" r="29" fill="none" stroke="var(--b)" stroke-width="4"/>
+<path d="M50 90 C38 80 36 70 43 66 C47 64 50 67 50 70 C50 67 53 64 57 66 C64 70 62 80 50 90Z" fill="var(--b)"/>
+<circle cx="80" cy="46" r="4.5" fill="var(--b)"/>
+</symbol>
+<symbol id="word" viewBox="0 0 330 80">
+<text x="0" y="62" font-family="Fraunces,Georgia,serif" font-style="italic" font-weight="700" font-size="76" fill="var(--a)" letter-spacing="-1">chamera</text>
+</symbol>
+</defs>
+</svg>
+
+<section class="hero" aria-label="Logo utama">
+<svg viewBox="0 0 440 130" role="img" aria-label="Logo Chamera" style="--a:#FFF4E3;--b:#D62839">
+<use href="#icon" x="0" y="2" width="102" height="126"/>
+<use href="#word" x="108" y="26" width="330" height="80"/>
+</svg>
+<p>Wear your memories.</p>
+</section>
+
+<section>
+<h2>Brief brand</h2>
+<p>Chamera adalah photobooth yang hasilnya bukan sekadar cetakan foto, tapi charm bracelet dan gantungan kunci berisi foto kamu sendiri. Nama Chamera berasal dari <em>charm</em> + <em>camera</em>.</p>
+<div class="grid">
+<div class="card"><h3>Arah visual</h3><p>Retro-nostalgic meets modern cute: nuansa photobooth jadul dipadukan kesan perhiasan yang manis.</p></div>
+<div class="card"><h3>Target</h3><p>Anak muda 17-27 tahun yang suka tampil beda, aktif di Instagram dan TikTok. Datang sendiri, bareng bestie, atau berdua sebagai couple.</p></div>
+<div class="card"><h3>Kepribadian</h3><p>Teman yang playful, hangat, dan sedikit sentimental. Nostalgic, personal, tactile.</p></div>
+<div class="card"><h3>Janji brand</h3><p>Momen kecil tidak berhenti di galeri HP. Ia dipakai, dibawa, dan dilihat tiap hari.</p></div>
+</div>
+<p class="cap">Catatan: arah visual di atas adalah asumsi awal. Kalau kamu lebih suka versi modern-clean, palet dan tipografi bisa disesuaikan.</p>
+</section>
+
+<section>
+<h2>Palet warna</h2>
+<p>Ketuk kartu warna untuk menyalin kode HEX.</p>
+<div class="grid">
+<button class="sw" data-c="#D62839"><i style="background:#D62839"></i><div><b>Cherry Flash</b>#D62839<small>RGB 214, 40, 57 · warna utama</small></div></button>
+<button class="sw" data-c="#FFF4E3"><i style="background:#FFF4E3"></i><div><b>Film Cream</b>#FFF4E3<small>RGB 255, 244, 227 · latar</small></div></button>
+<button class="sw" data-c="#F2B8C0"><i style="background:#F2B8C0"></i><div><b>Dusty Rose</b>#F2B8C0<small>RGB 242, 184, 192 · pendukung</small></div></button>
+<button class="sw" data-c="#26211F"><i style="background:#26211F"></i><div><b>Charcoal</b>#26211F<small>RGB 38, 33, 31 · teks dan garis</small></div></button>
+<button class="sw" data-c="#F6D98B"><i style="background:#F6D98B"></i><div><b>Butter Flash</b>#F6D98B<small>RGB 246, 217, 139 · aksen kecil</small></div></button>
+<button class="sw" data-c="#A9C9E8"><i style="background:#A9C9E8"></i><div><b>Sky Memory</b>#A9C9E8<small>RGB 169, 201, 232 · edisi spesial</small></div></button>
+</div>
+<p class="cap">Proporsi pakai: Cream 50% · Cherry 25% · Charcoal 10% · Rose 10% · Butter dan Sky 5%. Teks di atas Cherry selalu Cream.</p>
+</section>
+
+<section>
+<h2>Logo</h2>
+<p>Logo berupa charm dengan jump ring di atas, lensa kamera di badannya, titik flash di sudut, dan hati kecil sebagai pusat lensa. Satu bentuk yang langsung terbaca sebagai perhiasan sekaligus kamera.</p>
+<div class="grid">
+<div><div class="lg" style="background:#FFF4E3;border:1px solid var(--line)"><svg viewBox="0 0 440 130" style="--a:#D62839;--b:#FFF4E3"><use href="#icon" y="2" width="102" height="126"/><use href="#word" x="108" y="26" width="330" height="80"/></svg></div><p class="cap">Utama, di atas Cream</p></div>
+<div><div class="lg" style="background:#D62839"><svg viewBox="0 0 440 130" style="--a:#FFF4E3;--b:#D62839"><use href="#icon" y="2" width="102" height="126"/><use href="#word" x="108" y="26" width="330" height="80"/></svg></div><p class="cap">Terbalik, di atas Cherry</p></div>
+<div><div class="lg" style="background:#26211F"><svg viewBox="0 0 440 130" style="--a:#F2B8C0;--b:#26211F"><use href="#icon" y="2" width="102" height="126"/><use href="#word" x="108" y="26" width="330" height="80"/></svg></div><p class="cap">Di atas Charcoal</p></div>
+<div><div class="lg" style="background:#F2B8C0"><svg viewBox="0 0 100 124" style="--a:#D62839;--b:#F2B8C0"><use href="#icon" width="100" height="124"/></svg></div><p class="cap">Ikon saja: avatar, stempel, bagian belakang charm</p></div>
+</div>
+<div class="card" style="margin-top:14px"><b>Aturan pakai.</b> Beri ruang kosong di sekeliling logo sebesar tinggi lingkaran lensa. Lebar minimum 90 px (layar) atau 25 mm (cetak); di bawah itu pakai ikon saja. Jangan memutar, meregangkan, atau memberi bayangan pada logo.</div>
+</section>
+
+<section>
+<h2>Tipografi</h2>
+<div class="grid">
+<div class="card"><p class="cap">Judul dan logo</p><h1 style="font-size:46px;font-style:italic">Fraunces</h1><p>Serif lembut miring, memberi rasa nostalgia dan hangat. Pakai Semi Bold atau Bold Italic.</p></div>
+<div class="card"><p class="cap">Teks dan caption</p><div style="font:800 40px Nunito,sans-serif">Nunito</div><p>Sans-serif bulat yang ramah dan playful. Pakai Regular untuk teks, ExtraBold untuk tombol dan label.</p></div>
+</div>
+</section>
+
+<section>
+<h2>Suara dan gaya bicara</h2>
+<div class="do">
+<div class="card yes"><h3>Ya</h3><p>Pendek, manis, relatable.<br>"Momen kamu, jadi charm kamu."<br>"Berdua lebih lucu, apalagi pakai charm kembar."</p></div>
+<div class="card no"><h3>Tidak</h3><p>Terlalu formal atau terlalu lebay.<br>"Kami menyediakan layanan fotografi terpadu."<br>"OMG BANGET GUYS WAJIB BELI SEKARANG!!!"</p></div>
+</div>
+<div class="scroll" style="margin-top:18px"><table>
+<tr><th>Tagline utama</th><td>Wear your memories.</td></tr>
+<tr><th>Tagline pendukung</th><td>Snap it. Charm it. Keep it.</td></tr>
+<tr><th>Hashtag</th><td>#WearYourChamera</td></tr>
+<tr><th>Sapaan</th><td>kamu, kita (bukan "Anda")</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Prototipe penerapan</h2>
+<div class="mock">
+<div class="strip" style="--a:#D62839"><span style="background:var(--rose)"></span><span style="background:var(--butter)"></span><span style="background:var(--sky)"></span>chamera · 2026</div>
+
+<svg width="130" height="250" viewBox="0 0 130 250" role="img" aria-label="Mockup gantungan kunci">
+<circle cx="65" cy="22" r="14" fill="none" stroke="#9A8F86" stroke-width="5"/>
+<path d="M65 36v30" stroke="#9A8F86" stroke-width="4"/>
+<rect x="15" y="66" width="100" height="150" rx="14" fill="#D62839"/>
+<rect x="25" y="76" width="80" height="100" rx="6" fill="#F2B8C0"/>
+<circle cx="65" cy="118" r="22" fill="#FFF4E3"/><circle cx="65" cy="112" r="8" fill="#D62839"/><path d="M42 170c4-24 42-24 46 0z" fill="#D62839"/>
+<text x="65" y="199" text-anchor="middle" font-family="Fraunces,Georgia,serif" font-style="italic" font-weight="700" font-size="17" fill="#FFF4E3">chamera</text>
+</svg>
+
+<svg width="230" height="120" viewBox="0 0 230 120" role="img" aria-label="Mockup charm bracelet">
+<path d="M10 40 Q115 100 220 40" fill="none" stroke="#9A8F86" stroke-width="4" stroke-dasharray="6 3"/>
+<g><rect x="42" y="56" width="34" height="34" rx="8" fill="#D62839"/><rect x="48" y="62" width="22" height="22" rx="4" fill="#F2B8C0"/></g>
+<g><circle cx="115" cy="82" r="19" fill="#F6D98B"/><circle cx="115" cy="82" r="12" fill="none" stroke="#26211F" stroke-width="3"/></g>
+<g><rect x="154" y="56" width="34" height="34" rx="8" fill="#A9C9E8"/><path d="M171 83c-9-7-10-13-5-15 3-1 5 1 5 3 0-2 2-4 5-3 5 2 4 8-5 15z" fill="#D62839"/></g>
+</svg>
+
+<div class="ig"><div>Momen kamu, jadi charm kamu.<small>#WearYourChamera</small></div></div>
+
+<div class="box" style="--a:#FFF4E3;--b:#D62839"><svg viewBox="0 0 440 130"><use href="#icon" y="2" width="102" height="126"/><use href="#word" x="108" y="26" width="330" height="80"/></svg></div>
+</div>
+<p class="cap" style="text-align:center">Strip foto, gantungan kunci, charm bracelet, post Instagram, dan kotak kemasan.</p>
+</section>
+
+<footer>Chamera · Wear your memories.</footer>
+<div id="toast" role="status"></div>
+<script>
+var t=document.getElementById('toast');
+document.querySelectorAll('.sw').forEach(function(b){
+b.addEventListener('click',function(){
+var c=b.getAttribute('data-c');
+try{navigator.clipboard.writeText(c)}catch(e){}
+t.textContent=c+' disalin';t.classList.add('on');
+setTimeout(function(){t.classList.remove('on')},1400);
+});
+});
+</script>
+</body>
+</html>
