@@ -262,8 +262,8 @@ export function OrderForm() {
     <div className="shop" style={{ '--charm-aspect': `${CHARM_TILE_WIDTH} / ${CHARM_TILE_HEIGHT}` } as React.CSSProperties}>
       <div className="shop-inner">
         <header className="hero">
-          <Image className="hero-mascot is-left" src="/assets/maskot-page.webp" alt="" width={421} height={674} priority />
-          <Image className="hero-mascot is-right" src="/assets/maskot-page.webp" alt="" width={421} height={674} priority />
+          <Image className="hero-mascot is-left" src="/assets/maskot-page.webp" alt="" width={900} height={755} priority />
+          <Image className="hero-mascot is-right" src="/assets/maskot-page.webp" alt="" width={900} height={755} priority />
           <Image className="hero-logo" src="/assets/logo.webp" alt="Charmera – Wear your memories." width={410} height={312} priority />
           <h1 className="bubble-title is-hero">{config.batchLabel}</h1>
         </header>

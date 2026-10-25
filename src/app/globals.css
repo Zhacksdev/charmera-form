@@ -90,14 +90,16 @@ body {
 .hero-logo { display: block; width: clamp(150px, 42vw, 210px); height: auto; margin: 0 auto; }
 .hero-mascot {
   position: absolute;
-  top: -18px;
-  width: clamp(112px, 31vw, 190px);
+  top: 8px;
+  width: clamp(96px, 28vw, 170px);
   height: auto;
   pointer-events: none;
   user-select: none;
 }
-.hero-mascot.is-left { left: -16px; }
-.hero-mascot.is-right { right: -16px; transform: scaleX(-1); }
+/* The source bunny holds the magnifier on the image's left; mirror the left copy so
+   both bunnies peek inwards at the logo. */
+.hero-mascot.is-left { left: -12px; transform: scaleX(-1); }
+.hero-mascot.is-right { right: -12px; }
 .hero .bubble-title { margin-top: 10px; }
 
 /* Tabs */
@@ -655,9 +657,9 @@ body {
   .shop-inner { max-width: 760px; padding: 0 32px 150px; }
   .hero { padding-top: 26px; }
   .hero-logo { width: 240px; }
-  .hero-mascot { width: 170px; top: -22px; }
-  .hero-mascot.is-left { left: -40px; }
-  .hero-mascot.is-right { right: -40px; }
+  .hero-mascot { width: 200px; top: 10px; }
+  .hero-mascot.is-left { left: -24px; }
+  .hero-mascot.is-right { right: -24px; }
   .bubble-title.is-hero { font-size: 50px; }
   .bubble-title.is-section { font-size: 30px; }
   .bubble-title.is-label { font-size: 20px; }
@@ -707,9 +709,9 @@ body {
   }
   .shop-inner { max-width: 1160px; padding: 0 40px 60px; }
   .hero-logo { width: 260px; }
-  .hero-mascot { width: 250px; top: -30px; }
-  .hero-mascot.is-left { left: 0; }
-  .hero-mascot.is-right { right: 0; }
+  .hero-mascot { width: 270px; top: 6px; }
+  .hero-mascot.is-left { left: 10px; }
+  .hero-mascot.is-right { right: 10px; }
   .bubble-title.is-hero { font-size: 64px; }
 
   .split-layout {
