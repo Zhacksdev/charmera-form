@@ -1,10 +1,99 @@
-/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable @next/next/no-img-element -- admin previews show Supabase Storage URLs */
 'use client'
 
-import { Fragment, useState, useEffect } from 'react'
-import { supabase, supabaseAdmin, Package, Charm, Settings, Order } from '@/lib/supabase'
+import { Fragment, useEffect, useState } from 'react'
+import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
+import type { Charm, Order, Package, Settings } from '@/lib/supabase'
+import { DEFAULT_CONFIG } from '@/lib/order'
+import {
+  createQrisUpload, deleteCharm, deletePackage, hasSession, loadAdminData, login, logout,
+  saveCharm, saveGeneralSettings, savePackage, savePrices, setQrisImage, updateOrderStatus,
+} from './actions'
+import type { Result } from './actions'
 
 const ORDER_STATUSES = ['Menunggu verifikasi', 'Menunggu bayar', 'Terbayar', 'Diproses', 'Selesai']
+const MAX_QR_BYTES = 5 * 1024 * 1024
+
+type Tab = 'orders' | 'prices' | 'packages' | 'charms' | 'settings'
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'orders', label: 'Pesanan' },
+  { id: 'prices', label: 'Harga' },
+  { id: 'packages', label: 'Paket' },
+  { id: 'charms', label: 'Charm' },
+  { id: 'settings', label: 'Pengaturan' },
+]
+
+const UNIT_PRICES = [
+  { key: 'charm_price', label: 'Charm biasa', hint: 'Per charm dari katalog', fallback: DEFAULT_CONFIG.charmPrice },
+  { key: 'custom_charm_price', label: 'Charm custom', hint: 'Per charm dengan foto pelanggan', fallback: DEFAULT_CONFIG.customCharmPrice },
+  { key: 'keychain_price', label: 'Keychain satu sisi', hint: 'Per pcs', fallback: DEFAULT_CONFIG.keychainPrice },
+  { key: 'keychain_double_price', label: 'Keychain bolak balik', hint: 'Per pcs', fallback: DEFAULT_CONFIG.keychainDoublePrice },
+] as const
+type UnitKey = (typeof UNIT_PRICES)[number]['key']
+
+interface PriceDraft {
+  unit: Record<UnitKey, string>
+  packages: Record<string, { price: string; included_charms: string }>
+  charms: Record<string, string>
+}
+
+interface SettingsDraft {
+  batch_label: string
+  slot_count: string
+  whatsapp_number: string
+  pickup_options: string
+}
+
+const inputClass = 'w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none'
+
+function toText(value: number | null | undefined) {
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function toNumber(value: string) {
+  return value.trim() === '' ? null : Number(value)
+}
+
+function priceDraftFrom(settings: Settings | null, packages: Package[], charms: Charm[]): PriceDraft {
+  return {
+    unit: Object.fromEntries(UNIT_PRICES.map(u => [u.key, toText(settings?.[u.key])])) as Record<UnitKey, string>,
+    packages: Object.fromEntries(packages.map(p => [p.id, { price: String(p.price), included_charms: toText(p.included_charms ?? 0) }])),
+    charms: Object.fromEntries(charms.map(c => [c.id, toText(c.price)])),
+  }
+}
+
+function settingsDraftFrom(settings: Settings | null): SettingsDraft {
+  return {
+    batch_label: settings?.batch_label ?? '',
+    slot_count: String(settings?.slot_count ?? DEFAULT_CONFIG.slotCount),
+    whatsapp_number: settings?.whatsapp_number ?? '',
+    pickup_options: (settings?.pickup_options ?? DEFAULT_CONFIG.pickupOptions).join('\n'),
+  }
+}
+
+function PriceInput({ value, onChange, placeholder, label }: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  label: string
+}) {
+  return (
+    <div className="flex items-center rounded-xl border border-line bg-cream focus-within:border-cherry">
+      <span className="pl-4 pr-1 text-sm font-semibold text-char/60">Rp</span>
+      <input
+        type="number"
+        min={0}
+        step={500}
+        inputMode="numeric"
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="w-full bg-transparent px-2 py-3 focus:outline-none"
+      />
+    </div>
+  )
+}
 
 type OrderItem = {
   type?: string
@@ -13,7 +102,7 @@ type OrderItem = {
   double_sided?: boolean
   quantity?: number
   subtotal?: number
-  slots?: ({ position: number; kind: string; name?: string | null; photo_url?: string }| null)[]
+  slots?: ({ position: number; kind: string; name?: string | null; photo_url?: string } | null)[]
   sides?: { side: string; print_url: string; original_url: string }[]
 }
 
@@ -70,151 +159,194 @@ function OrderDetails({ order }: { order: Order }) {
 export default function AdminPage() {
   const [isAuth, setIsAuth] = useState(false)
   const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+  const [tab, setTab] = useState<Tab>('orders')
+
   const [settings, setSettings] = useState<Settings | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [packages, setPackages] = useState<Package[]>([])
   const [charms, setCharms] = useState<Charm[]>([])
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'orders' | 'packages' | 'charms' | 'settings'>('orders')
+  const [prices, setPrices] = useState<PriceDraft>(() => priceDraftFrom(null, [], []))
+  const [general, setGeneral] = useState<SettingsDraft>(() => settingsDraftFrom(null))
 
   const [editingPkg, setEditingPkg] = useState<Partial<Package> | null>(null)
   const [editingCharm, setEditingCharm] = useState<Partial<Charm> | null>(null)
   const [openOrder, setOpenOrder] = useState<string | null>(null)
+  const [qrFile, setQrFile] = useState<File | null>(null)
+  const [qrPreview, setQrPreview] = useState<string | null>(null)
 
-  async function loadData() {
-    const [settingsRes, ordersRes, packagesRes, charmsRes] = await Promise.all([
-      supabase.from('settings').select('*').limit(1).single(),
-      supabaseAdmin.from('orders').select('*').order('created_at', { ascending: false }),
-      supabaseAdmin.from('packages').select('*').order('created_at'),
-      supabaseAdmin.from('charms').select('*').order('sort_order'),
-    ])
+  function show(result: Result<unknown>, success?: string) {
+    if (!result.ok) {
+      setNotice({ type: 'error', text: result.error })
+      if (result.error.startsWith('Sesi admin')) setIsAuth(false)
+      return false
+    }
+    if (success) setNotice({ type: 'ok', text: success })
+    return true
+  }
 
-    if (settingsRes.data) setSettings(settingsRes.data)
-    if (ordersRes.data) setOrders(ordersRes.data)
-    if (packagesRes.data) setPackages(packagesRes.data)
-    if (charmsRes.data) setCharms(charmsRes.data)
-    setLoading(false)
+  async function run<T>(action: () => Promise<Result<T>>, success?: string) {
+    setBusy(true)
+    try {
+      const result = await action()
+      return show(result, success) ? result : null
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refresh() {
+    const result = await loadAdminData()
+    if (!show(result) || !result.ok) return
+    const { settings: s, orders: o, packages: p, charms: c } = result.data
+    setSettings(s)
+    setOrders(o)
+    setPackages(p)
+    setCharms(c)
+    setPrices(priceDraftFrom(s, p, c))
+    setGeneral(settingsDraftFrom(s))
   }
 
   useEffect(() => {
-    const auth = sessionStorage.getItem('adminAuth')
-    if (auth === 'true') {
-      setIsAuth(true)
-      loadData()
-    } else {
+    hasSession().then(async ok => {
+      setIsAuth(ok)
+      if (ok) await refresh()
       setLoading(false)
-    }
+    })
+    // refresh only needs to run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function handleLogin() {
-    if (password === (settings?.admin_password || 'admin123')) {
-      sessionStorage.setItem('adminAuth', 'true')
-      setIsAuth(true)
-      loadData()
-    } else {
-      alert('Password salah')
-    }
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), 4000)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  async function handleLogin() {
+    setBusy(true)
+    const result = await login(password)
+    setBusy(false)
+    if (!show(result)) return
+    setPassword('')
+    setIsAuth(true)
+    setLoading(true)
+    await refresh()
+    setLoading(false)
   }
 
-  function handleLogout() {
-    sessionStorage.removeItem('adminAuth')
+  async function handleLogout() {
+    await logout()
     setIsAuth(false)
   }
 
-  async function updateOrderStatus(orderId: string, status: string) {
-    const { error } = await supabaseAdmin
-      .from('orders')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', orderId)
-
-    if (!error) {
+  async function changeStatus(orderId: string, status: string) {
+    if (await run(() => updateOrderStatus(orderId, status))) {
       setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, status } : o)))
     }
   }
 
-  async function updateSettings() {
-    if (!settings) return
-    const { error } = await supabaseAdmin
-      .from('settings')
-      .update({
-        slot_count: settings.slot_count,
-        admin_password: settings.admin_password,
-        whatsapp_number: settings.whatsapp_number,
-        batch_label: settings.batch_label || null,
-        charm_price: settings.charm_price ?? null,
-        custom_charm_price: settings.custom_charm_price ?? null,
-        keychain_price: settings.keychain_price ?? null,
-        keychain_double_price: settings.keychain_double_price ?? null,
-        pickup_options: settings.pickup_options?.filter(Boolean) ?? null,
-        qris_image_url: settings.qris_image_url || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
-
-    if (!error) alert('Pengaturan disimpan')
-    else alert('Gagal menyimpan')
+  async function handleSavePrices() {
+    const ok = await run(() => savePrices({
+      unit: Object.fromEntries(UNIT_PRICES.map(u => [u.key, toNumber(prices.unit[u.key])])) as Record<UnitKey, number | null>,
+      packages: Object.entries(prices.packages).map(([id, p]) => ({
+        id,
+        price: toNumber(p.price) ?? 0,
+        included_charms: toNumber(p.included_charms) ?? 0,
+      })),
+      charms: Object.entries(prices.charms).map(([id, value]) => ({ id, price: toNumber(value) })),
+    }), 'Harga disimpan.')
+    if (ok) await refresh()
   }
 
-  async function savePackage() {
-    if (!editingPkg || !editingPkg.name || editingPkg.price === undefined) return
+  async function handleSaveGeneral() {
+    const ok = await run(() => saveGeneralSettings({
+      batch_label: general.batch_label,
+      slot_count: Number(general.slot_count),
+      whatsapp_number: general.whatsapp_number,
+      pickup_options: general.pickup_options.split('\n'),
+    }), 'Pengaturan disimpan.')
+    if (ok) await refresh()
+  }
 
-    const data = {
-      name: editingPkg.name,
-      price: editingPkg.price,
-      description: editingPkg.description || null,
-      items: editingPkg.items?.filter(Boolean) ?? [],
-      included_charms: editingPkg.included_charms ?? 0,
-      is_active: editingPkg.is_active ?? true,
+  function pickQr(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setNotice({ type: 'error', text: 'File QR harus berupa gambar.' })
+    if (file.size > MAX_QR_BYTES) return setNotice({ type: 'error', text: 'Ukuran gambar QR maksimal 5 MB.' })
+    if (qrPreview) URL.revokeObjectURL(qrPreview)
+    setQrFile(file)
+    setQrPreview(URL.createObjectURL(file))
+  }
+
+  function clearQrSelection() {
+    if (qrPreview) URL.revokeObjectURL(qrPreview)
+    setQrFile(null)
+    setQrPreview(null)
+  }
+
+  async function uploadQr() {
+    if (!qrFile) return
+    setBusy(true)
+    try {
+      const ticket = await createQrisUpload(qrFile.name.split('.').pop() ?? 'png')
+      if (!show(ticket) || !ticket.ok) return
+      const { error } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .uploadToSignedUrl(ticket.data.path, ticket.data.token, qrFile, { contentType: qrFile.type })
+      if (error) return setNotice({ type: 'error', text: `Upload gagal: ${error.message}` })
+      const saved = await setQrisImage(ticket.data.path)
+      if (!show(saved, 'QR pembayaran diperbarui.') || !saved.ok) return
+      setSettings(prev => (prev ? { ...prev, qris_image_url: saved.data } : prev))
+      clearQrSelection()
+    } finally {
+      setBusy(false)
     }
+  }
 
-    const { error } = editingPkg.id
-      ? await supabaseAdmin.from('packages').update(data).eq('id', editingPkg.id)
-      : await supabaseAdmin.from('packages').insert([data])
+  async function removeQr() {
+    if (!confirm('Hapus QR pembayaran? Form akan memakai /assets/qris.png kalau ada.')) return
+    const result = await run(() => setQrisImage(null), 'QR pembayaran dihapus.')
+    if (result) setSettings(prev => (prev ? { ...prev, qris_image_url: null } : prev))
+  }
 
-    if (!error) {
+  async function handleSavePackage() {
+    if (!editingPkg) return
+    if (await run(() => savePackage(editingPkg), 'Paket disimpan.')) {
       setEditingPkg(null)
-      loadData()
-    } else {
-      alert('Gagal menyimpan')
+      await refresh()
     }
   }
 
-  async function deletePackage(id: string) {
+  async function handleDeletePackage(id: string) {
     if (!confirm('Hapus paket ini?')) return
-    const { error } = await supabaseAdmin.from('packages').delete().eq('id', id)
-    if (!error) loadData()
+    if (await run(() => deletePackage(id), 'Paket dihapus.')) await refresh()
   }
 
-  async function saveCharm() {
-    if (!editingCharm || !(editingCharm.emoji || editingCharm.image_url || editingCharm.catalog_index)) return
-
-    const data = {
-      emoji: editingCharm.emoji || '',
-      name: editingCharm.name || null,
-      image_url: editingCharm.image_url || null,
-      catalog_index: editingCharm.catalog_index || null,
-      price: editingCharm.price || null,
-      is_active: editingCharm.is_active ?? true,
-      sort_order: editingCharm.sort_order || 0,
-    }
-
-    const { error } = editingCharm.id
-      ? await supabaseAdmin.from('charms').update(data).eq('id', editingCharm.id)
-      : await supabaseAdmin.from('charms').insert([data])
-
-    if (!error) {
+  async function handleSaveCharm() {
+    if (!editingCharm) return
+    if (await run(() => saveCharm(editingCharm), 'Charm disimpan.')) {
       setEditingCharm(null)
-      loadData()
-    } else {
-      alert('Gagal menyimpan')
+      await refresh()
     }
   }
 
-  async function deleteCharm(id: string) {
+  async function handleDeleteCharm(id: string) {
     if (!confirm('Hapus charm ini?')) return
-    const { error } = await supabaseAdmin.from('charms').delete().eq('id', id)
-    if (!error) loadData()
+    if (await run(() => deleteCharm(id), 'Charm dihapus.')) await refresh()
   }
+
+  const noticeBanner = notice && (
+    <div
+      role={notice.type === 'error' ? 'alert' : 'status'}
+      className={`fixed bottom-4 left-1/2 z-60 -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ${
+        notice.type === 'error' ? 'bg-cherry text-cream' : 'bg-char text-cream'
+      }`}
+    >
+      {notice.text}
+    </div>
+  )
 
   if (loading) {
     return (
@@ -227,32 +359,44 @@ export default function AdminPage() {
   if (!isAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-cream p-4">
-        <div className="bg-card rounded-2xl p-8 border border-line shadow-lg w-full max-w-sm">
+        <form
+          className="bg-card rounded-2xl p-8 border border-line shadow-lg w-full max-w-sm"
+          onSubmit={e => {
+            e.preventDefault()
+            handleLogin()
+          }}
+        >
           <h1 className="font-display text-2xl font-semibold text-center mb-6">Admin Login</h1>
           <input
             type="password"
             placeholder="Password"
+            autoComplete="current-password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleLogin()}
-            className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none mb-4"
+            className={`${inputClass} mb-4`}
           />
           <button
-            onClick={handleLogin}
-            className="w-full py-3 bg-cherry text-cream font-bold rounded-full hover:bg-cherry/90 transition-all"
+            type="submit"
+            disabled={busy || !password}
+            className="w-full py-3 bg-cherry text-cream font-bold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
           >
-            Masuk
+            {busy ? 'Memeriksa…' : 'Masuk'}
           </button>
-        </div>
+        </form>
+        {noticeBanner}
       </div>
     )
   }
+
+  const unitFallbacks = Object.fromEntries(UNIT_PRICES.map(u => [u.key, u.fallback])) as Record<UnitKey, number>
+  const defaultCharmPrice = toNumber(prices.unit.charm_price) ?? unitFallbacks.charm_price
+  const currentQr = qrPreview ?? settings?.qris_image_url ?? null
 
   return (
     <div className="min-h-screen bg-cream">
       <header className="bg-char text-cream py-6 px-6">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="font-display text-2xl font-semibold">Chamera Admin</h1>
+          <h1 className="font-display text-2xl font-semibold">Charmera Admin</h1>
           <button
             onClick={handleLogout}
             className="px-4 py-2 bg-cream/20 rounded-full text-sm hover:bg-cream/30 transition-all"
@@ -264,15 +408,15 @@ export default function AdminPage() {
 
       <nav className="bg-card border-b border-line sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex gap-1 p-2 overflow-x-auto">
-          {(['orders', 'packages', 'charms', 'settings'] as const).map(t => (
+          {TABS.map(t => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={t.id}
+              onClick={() => setTab(t.id)}
               className={`px-4 py-2 rounded-full font-semibold whitespace-nowrap transition-all ${
-                tab === t ? 'bg-cherry text-cream' : 'hover:bg-rose/30'
+                tab === t.id ? 'bg-cherry text-cream' : 'hover:bg-rose/30'
               }`}
             >
-              {t === 'orders' ? 'Pesanan' : t === 'packages' ? 'Paket' : t === 'charms' ? 'Charm' : 'Pengaturan'}
+              {t.label}
             </button>
           ))}
         </div>
@@ -308,45 +452,48 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
+                    {orders.length === 0 && (
+                      <tr><td colSpan={8} className="p-6 text-center text-char/60">Belum ada pesanan.</td></tr>
+                    )}
                     {orders.map(order => (
                       <Fragment key={order.id}>
-                      <tr className="border-t border-line hover:bg-rose/10">
-                        <td className="p-3 font-mono text-xs">
-                          <button
-                            onClick={() => setOpenOrder(openOrder === order.id ? null : order.id)}
-                            className="underline"
-                            aria-expanded={openOrder === order.id}
-                          >
-                            {order.order_code || order.id.slice(0, 8)}
-                          </button>
-                        </td>
-                        <td className="p-3">{order.package_name}</td>
-                        <td className="p-3">{order.customer_name}</td>
-                        <td className="p-3">{order.customer_whatsapp}</td>
-                        <td className="p-3">{order.quantity}</td>
-                        <td className="p-3 font-semibold">Rp {order.total_price.toLocaleString('id')}</td>
-                        <td className="p-3">
-                          <select
-                            value={order.status}
-                            onChange={e => updateOrderStatus(order.id, e.target.value)}
-                            className="px-2 py-1 rounded-lg border border-line bg-cream text-sm"
-                          >
-                            {ORDER_STATUSES.map(s => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="p-3 text-xs text-char/70">
-                          {new Date(order.created_at).toLocaleDateString('id')}
-                        </td>
-                      </tr>
-                      {openOrder === order.id && (
-                        <tr className="bg-cream/60">
-                          <td colSpan={8} className="p-4">
-                            <OrderDetails order={order} />
+                        <tr className="border-t border-line hover:bg-rose/10">
+                          <td className="p-3 font-mono text-xs">
+                            <button
+                              onClick={() => setOpenOrder(openOrder === order.id ? null : order.id)}
+                              className="underline"
+                              aria-expanded={openOrder === order.id}
+                            >
+                              {order.order_code || order.id.slice(0, 8)}
+                            </button>
+                          </td>
+                          <td className="p-3">{order.package_name}</td>
+                          <td className="p-3">{order.customer_name}</td>
+                          <td className="p-3">{order.customer_whatsapp}</td>
+                          <td className="p-3">{order.quantity}</td>
+                          <td className="p-3 font-semibold">Rp {order.total_price.toLocaleString('id')}</td>
+                          <td className="p-3">
+                            <select
+                              value={order.status}
+                              onChange={e => changeStatus(order.id, e.target.value)}
+                              className="px-2 py-1 rounded-lg border border-line bg-cream text-sm"
+                            >
+                              {ORDER_STATUSES.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="p-3 text-xs text-char/70">
+                            {new Date(order.created_at).toLocaleDateString('id')}
                           </td>
                         </tr>
-                      )}
+                        {openOrder === order.id && (
+                          <tr className="bg-cream/60">
+                            <td colSpan={8} className="p-4">
+                              <OrderDetails order={order} />
+                            </td>
+                          </tr>
+                        )}
                       </Fragment>
                     ))}
                   </tbody>
@@ -356,11 +503,136 @@ export default function AdminPage() {
           </div>
         )}
 
+        {tab === 'prices' && (
+          <form
+            className="space-y-6 max-w-4xl"
+            onSubmit={e => {
+              e.preventDefault()
+              handleSavePrices()
+            }}
+          >
+            <section className="bg-card rounded-2xl p-6 border border-line">
+              <h2 className="font-display text-xl font-semibold">Harga satuan</h2>
+              <p className="text-sm text-char/70 mb-4">Kosongkan untuk memakai harga bawaan.</p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {UNIT_PRICES.map(u => (
+                  <label key={u.key} className="block">
+                    <span className="block font-semibold">{u.label}</span>
+                    <span className="block text-xs text-char/60 mb-2">{u.hint}</span>
+                    <PriceInput
+                      label={u.label}
+                      value={prices.unit[u.key]}
+                      placeholder={String(u.fallback)}
+                      onChange={value => setPrices(prev => ({ ...prev, unit: { ...prev.unit, [u.key]: value } }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            <section className="bg-card rounded-2xl p-6 border border-line">
+              <h2 className="font-display text-xl font-semibold">Harga set gelang</h2>
+              <p className="text-sm text-char/70 mb-4">
+                Harga set sudah termasuk gelang dan sejumlah charm biasa. Charm di luar jatah dihitung per charm.
+              </p>
+              {packages.length === 0 ? (
+                <p className="text-sm text-char/60">Belum ada paket. Tambahkan di tab Paket.</p>
+              ) : (
+                <div className="divide-y divide-line">
+                  {packages.map(pkg => (
+                    <div key={pkg.id} className="grid gap-3 py-4 sm:grid-cols-[1fr_200px_160px] sm:items-end">
+                      <div>
+                        <p className="font-semibold">
+                          {pkg.name}
+                          {!pkg.is_active && <span className="ml-2 rounded-full bg-char/10 px-2 py-0.5 text-xs">Nonaktif</span>}
+                        </p>
+                        {pkg.items?.length ? <p className="text-xs text-char/60">{pkg.items.join(' · ')}</p> : null}
+                      </div>
+                      <label className="block text-sm">
+                        Harga set
+                        <PriceInput
+                          label={`Harga ${pkg.name}`}
+                          value={prices.packages[pkg.id]?.price ?? ''}
+                          onChange={value => setPrices(prev => ({
+                            ...prev,
+                            packages: { ...prev.packages, [pkg.id]: { ...prev.packages[pkg.id], price: value } },
+                          }))}
+                        />
+                      </label>
+                      <label className="block text-sm">
+                        Charm termasuk
+                        <input
+                          type="number"
+                          min={0}
+                          value={prices.packages[pkg.id]?.included_charms ?? ''}
+                          onChange={e => {
+                            const value = e.target.value
+                            setPrices(prev => ({
+                              ...prev,
+                              packages: { ...prev.packages, [pkg.id]: { ...prev.packages[pkg.id], included_charms: value } },
+                            }))
+                          }}
+                          className={inputClass}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="bg-card rounded-2xl p-6 border border-line">
+              <h2 className="font-display text-xl font-semibold">Harga khusus per charm</h2>
+              <p className="text-sm text-char/70 mb-4">
+                Isi hanya untuk charm yang harganya beda. Kosong berarti ikut harga charm biasa (Rp {defaultCharmPrice.toLocaleString('id')}).
+              </p>
+              {charms.length === 0 ? (
+                <p className="text-sm text-char/60">
+                  Belum ada charm di database, jadi form memakai 64 charm katalog bawaan dengan harga charm biasa.
+                  Tambahkan charm di tab Charm untuk memberi harga khusus.
+                </p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {charms.map(charm => {
+                    const image = charm.image_url || (charm.catalog_index ? `/charms/catalog-${String(charm.catalog_index).padStart(2, '0')}.webp` : null)
+                    return (
+                      <div key={charm.id} className="flex items-center gap-3 rounded-xl border border-line p-3">
+                        <div className="grid h-12 w-14 flex-none place-items-center rounded-lg bg-cream text-2xl">
+                          {image ? <img src={image} alt="" className="h-full w-full object-contain" /> : charm.emoji}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">{charm.name || 'Tanpa nama'}</p>
+                          <PriceInput
+                            label={`Harga ${charm.name || 'charm'}`}
+                            value={prices.charms[charm.id] ?? ''}
+                            placeholder={String(defaultCharmPrice)}
+                            onChange={value => setPrices(prev => ({ ...prev, charms: { ...prev.charms, [charm.id]: value } }))}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+
+            <div className="sticky bottom-4 flex justify-end">
+              <button
+                type="submit"
+                disabled={busy}
+                className="px-8 py-3 bg-cherry text-cream font-bold rounded-full shadow-lg hover:bg-cherry/90 transition-all disabled:opacity-50"
+              >
+                {busy ? 'Menyimpan…' : 'Simpan semua harga'}
+              </button>
+            </div>
+          </form>
+        )}
+
         {tab === 'packages' && (
           <div className="space-y-4">
             <div className="flex justify-end">
               <button
-                onClick={() => setEditingPkg({ name: '', price: 0, is_active: true })}
+                onClick={() => setEditingPkg({ name: '', price: 0, items: [], included_charms: 0, is_active: true })}
                 className="px-4 py-2 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all"
               >
                 + Tambah Paket
@@ -374,19 +646,14 @@ export default function AdminPage() {
                     <div>
                       <h3 className="font-semibold text-lg">{pkg.name}</h3>
                       <p className="text-cherry font-bold">Rp {pkg.price.toLocaleString('id')}</p>
-                      {pkg.description && <p className="text-sm text-char/70 mt-1">{pkg.description}</p>}
+                      {pkg.items?.length ? <p className="text-sm text-char/70 mt-1">{pkg.items.join(' · ')}</p> : null}
+                      <p className="text-xs text-char/60 mt-1">{pkg.included_charms ?? 0} charm biasa termasuk</p>
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => setEditingPkg(pkg)}
-                        className="px-3 py-1 text-sm bg-sky/30 rounded-full hover:bg-sky/50"
-                      >
+                      <button onClick={() => setEditingPkg(pkg)} className="px-3 py-1 text-sm bg-sky/30 rounded-full hover:bg-sky/50">
                         Edit
                       </button>
-                      <button
-                        onClick={() => deletePackage(pkg.id)}
-                        className="px-3 py-1 text-sm bg-rose/50 rounded-full hover:bg-rose"
-                      >
+                      <button onClick={() => handleDeletePackage(pkg.id)} className="px-3 py-1 text-sm bg-rose/50 rounded-full hover:bg-rose">
                         Hapus
                       </button>
                     </div>
@@ -410,20 +677,21 @@ export default function AdminPage() {
                       placeholder="Nama paket"
                       value={editingPkg.name || ''}
                       onChange={e => setEditingPkg(prev => prev ? { ...prev, name: e.target.value } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      className={inputClass}
                     />
-                    <input
-                      type="number"
-                      placeholder="Harga"
-                      value={editingPkg.price || 0}
-                      onChange={e => setEditingPkg(prev => prev ? { ...prev, price: parseInt(e.target.value) || 0 } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
-                    />
+                    <label className="block text-sm">
+                      Harga set
+                      <PriceInput
+                        label="Harga set"
+                        value={toText(editingPkg.price)}
+                        onChange={value => setEditingPkg(prev => prev ? { ...prev, price: toNumber(value) ?? 0 } : null)}
+                      />
+                    </label>
                     <textarea
                       placeholder="Deskripsi (opsional)"
                       value={editingPkg.description || ''}
                       onChange={e => setEditingPkg(prev => prev ? { ...prev, description: e.target.value } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none resize-none"
+                      className={`${inputClass} resize-none`}
                       rows={2}
                     />
                     <label className="block text-sm">
@@ -431,7 +699,7 @@ export default function AdminPage() {
                       <textarea
                         value={(editingPkg.items ?? []).join('\n')}
                         onChange={e => setEditingPkg(prev => prev ? { ...prev, items: e.target.value.split('\n') } : null)}
-                        className="mt-1 w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none resize-none"
+                        className={`mt-1 ${inputClass} resize-none`}
                         rows={3}
                       />
                     </label>
@@ -442,7 +710,7 @@ export default function AdminPage() {
                         min={0}
                         value={editingPkg.included_charms ?? 0}
                         onChange={e => setEditingPkg(prev => prev ? { ...prev, included_charms: parseInt(e.target.value) || 0 } : null)}
-                        className="mt-1 w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                        className={`mt-1 ${inputClass}`}
                       />
                     </label>
                     <label className="flex items-center gap-2">
@@ -463,8 +731,9 @@ export default function AdminPage() {
                       Batal
                     </button>
                     <button
-                      onClick={savePackage}
-                      className="flex-1 py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all"
+                      onClick={handleSavePackage}
+                      disabled={busy}
+                      className="flex-1 py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
                     >
                       Simpan
                     </button>
@@ -487,6 +756,9 @@ export default function AdminPage() {
             </div>
 
             <div className="bg-card rounded-2xl border border-line p-4">
+              {charms.length === 0 && (
+                <p className="text-sm text-char/60">Belum ada charm. Form memakai 64 charm katalog bawaan.</p>
+              )}
               <div className="flex flex-wrap gap-3">
                 {charms.map(charm => (
                   <div key={charm.id} className="relative group">
@@ -496,7 +768,6 @@ export default function AdminPage() {
                       }`}
                     >
                       {charm.image_url || charm.catalog_index ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={charm.image_url || `/charms/catalog-${String(charm.catalog_index).padStart(2, '0')}.webp`}
                           alt={charm.name || 'Charm'}
@@ -508,18 +779,21 @@ export default function AdminPage() {
                       <button
                         onClick={() => setEditingCharm(charm)}
                         className="w-6 h-6 bg-sky rounded-full text-xs flex items-center justify-center"
+                        aria-label="Edit charm"
                       >
                         ✎
                       </button>
                       <button
-                        onClick={() => deleteCharm(charm.id)}
+                        onClick={() => handleDeleteCharm(charm.id)}
                         className="w-6 h-6 bg-rose rounded-full text-xs flex items-center justify-center"
+                        aria-label="Hapus charm"
                       >
                         ×
                       </button>
                     </div>
-                    {charm.name && (
-                      <p className="text-xs text-center mt-1 text-char/70">{charm.name}</p>
+                    {charm.name && <p className="text-xs text-center mt-1 text-char/70">{charm.name}</p>}
+                    {charm.price != null && (
+                      <p className="text-[10px] text-center text-cherry font-semibold">Rp {charm.price.toLocaleString('id')}</p>
                     )}
                   </div>
                 ))}
@@ -535,24 +809,17 @@ export default function AdminPage() {
                   <div className="space-y-4">
                     <input
                       type="text"
-                      placeholder="Emoji (contoh: 🌸)"
-                      value={editingCharm.emoji || ''}
-                      onChange={e => setEditingCharm(prev => prev ? { ...prev, emoji: e.target.value } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none text-2xl text-center"
-                    />
-                    <input
-                      type="text"
                       placeholder="Nama (opsional)"
                       value={editingCharm.name || ''}
                       onChange={e => setEditingCharm(prev => prev ? { ...prev, name: e.target.value } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      className={inputClass}
                     />
                     <input
                       type="url"
                       placeholder="URL gambar charm (opsional)"
                       value={editingCharm.image_url || ''}
                       onChange={e => setEditingCharm(prev => prev ? { ...prev, image_url: e.target.value } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      className={inputClass}
                     />
                     <input
                       type="number"
@@ -560,21 +827,30 @@ export default function AdminPage() {
                       placeholder="Nomor di katalog bawaan (1-64, opsional)"
                       value={editingCharm.catalog_index || ''}
                       onChange={e => setEditingCharm(prev => prev ? { ...prev, catalog_index: parseInt(e.target.value) || null } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      className={inputClass}
                     />
                     <input
-                      type="number"
-                      placeholder="Harga khusus (kosongkan untuk harga default)"
-                      value={editingCharm.price || ''}
-                      onChange={e => setEditingCharm(prev => prev ? { ...prev, price: parseInt(e.target.value) || null } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      type="text"
+                      placeholder="Emoji (opsional)"
+                      value={editingCharm.emoji || ''}
+                      onChange={e => setEditingCharm(prev => prev ? { ...prev, emoji: e.target.value } : null)}
+                      className={inputClass}
                     />
+                    <label className="block text-sm">
+                      Harga khusus (kosongkan untuk harga charm biasa)
+                      <PriceInput
+                        label="Harga khusus"
+                        value={toText(editingCharm.price)}
+                        placeholder={String(defaultCharmPrice)}
+                        onChange={value => setEditingCharm(prev => prev ? { ...prev, price: toNumber(value) } : null)}
+                      />
+                    </label>
                     <input
                       type="number"
                       placeholder="Urutan"
                       value={editingCharm.sort_order || 0}
                       onChange={e => setEditingCharm(prev => prev ? { ...prev, sort_order: parseInt(e.target.value) || 0 } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                      className={inputClass}
                     />
                     <label className="flex items-center gap-2">
                       <input
@@ -594,8 +870,9 @@ export default function AdminPage() {
                       Batal
                     </button>
                     <button
-                      onClick={saveCharm}
-                      className="flex-1 py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all"
+                      onClick={handleSaveCharm}
+                      disabled={busy}
+                      className="flex-1 py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
                     >
                       Simpan
                     </button>
@@ -606,92 +883,118 @@ export default function AdminPage() {
           </div>
         )}
 
-        {tab === 'settings' && settings && (
-          <div className="max-w-lg mx-auto">
-            <div className="bg-card rounded-2xl p-6 border border-line space-y-6">
-              <div>
-                <label className="block font-medium mb-2">Jumlah slot bracelet</label>
+        {tab === 'settings' && (
+          <div className="grid gap-6 lg:grid-cols-2 items-start">
+            <section className="bg-card rounded-2xl p-6 border border-line space-y-5">
+              <h2 className="font-display text-xl font-semibold">QR pembayaran</h2>
+              <div className="grid place-items-center rounded-2xl border-2 border-dashed border-line bg-cream p-4">
+                {currentQr ? (
+                  <img src={currentQr} alt="QR pembayaran" className="max-h-72 w-auto rounded-lg bg-white" />
+                ) : (
+                  <p className="py-16 text-center text-sm text-char/60">
+                    Belum ada QR. Form akan memakai /assets/qris.png kalau ada,
+                    atau menampilkan pesan bahwa info pembayaran dikirim lewat WhatsApp.
+                  </p>
+                )}
+              </div>
+              {qrPreview && <p className="text-sm text-cherry font-semibold text-center">Preview, belum disimpan.</p>}
+              <div className="flex flex-wrap gap-2">
+                <label className="cursor-pointer px-4 py-2 rounded-full border-2 border-cherry text-cherry font-semibold hover:bg-rose/30">
+                  {currentQr ? 'Pilih gambar lain' : 'Pilih gambar QR'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={e => {
+                      pickQr(e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                {qrFile && (
+                  <>
+                    <button
+                      onClick={uploadQr}
+                      disabled={busy}
+                      className="px-4 py-2 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 disabled:opacity-50"
+                    >
+                      {busy ? 'Mengupload…' : 'Simpan QR'}
+                    </button>
+                    <button onClick={clearQrSelection} className="px-4 py-2 rounded-full bg-char/10 font-semibold hover:bg-char/20">
+                      Batal
+                    </button>
+                  </>
+                )}
+                {!qrFile && settings?.qris_image_url && (
+                  <button onClick={removeQr} disabled={busy} className="px-4 py-2 rounded-full bg-rose/60 font-semibold hover:bg-rose">
+                    Hapus QR
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-char/60">JPG atau PNG, maksimal 5 MB. Pastikan QR terlihat jelas dan tidak terpotong.</p>
+            </section>
+
+            <form
+              className="bg-card rounded-2xl p-6 border border-line space-y-5"
+              onSubmit={e => {
+                e.preventDefault()
+                handleSaveGeneral()
+              }}
+            >
+              <h2 className="font-display text-xl font-semibold">Umum</h2>
+              <label className="block">
+                <span className="block font-medium mb-2">Judul batch</span>
+                <input
+                  type="text"
+                  placeholder={DEFAULT_CONFIG.batchLabel}
+                  value={general.batch_label}
+                  onChange={e => setGeneral(prev => ({ ...prev, batch_label: e.target.value }))}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="block font-medium mb-2">Jumlah slot gelang</span>
                 <input
                   type="number"
-                  value={settings.slot_count}
-                  onChange={e => setSettings(prev => prev ? { ...prev, slot_count: parseInt(e.target.value) || 9 } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                  min={1}
+                  max={30}
+                  value={general.slot_count}
+                  onChange={e => setGeneral(prev => ({ ...prev, slot_count: e.target.value }))}
+                  className={inputClass}
                 />
-              </div>
-              <div>
-                <label className="block font-medium mb-2">Password admin</label>
+              </label>
+              <label className="block">
+                <span className="block font-medium mb-2">Nomor WhatsApp admin</span>
                 <input
-                  type="text"
-                  value={settings.admin_password}
-                  onChange={e => setSettings(prev => prev ? { ...prev, admin_password: e.target.value } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block font-medium mb-2">Nomor WhatsApp (untuk notifikasi)</label>
-                <input
-                  type="text"
+                  type="tel"
                   placeholder="628123456789"
-                  value={settings.whatsapp_number || ''}
-                  onChange={e => setSettings(prev => prev ? { ...prev, whatsapp_number: e.target.value } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
+                  value={general.whatsapp_number}
+                  onChange={e => setGeneral(prev => ({ ...prev, whatsapp_number: e.target.value }))}
+                  className={inputClass}
                 />
-              </div>
-              <div>
-                <label className="block font-medium mb-2">Judul batch (contoh: Open PO Batch 2)</label>
-                <input
-                  type="text"
-                  value={settings.batch_label || ''}
-                  onChange={e => setSettings(prev => prev ? { ...prev, batch_label: e.target.value } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {([
-                  ['charm_price', 'Harga charm'],
-                  ['custom_charm_price', 'Harga charm custom'],
-                  ['keychain_price', 'Keychain satu sisi'],
-                  ['keychain_double_price', 'Keychain bolak balik'],
-                ] as const).map(([key, label]) => (
-                  <div key={key}>
-                    <label className="block font-medium mb-2">{label}</label>
-                    <input
-                      type="number"
-                      value={settings[key] ?? ''}
-                      onChange={e => setSettings(prev => prev ? { ...prev, [key]: parseInt(e.target.value) || null } : null)}
-                      className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
-                    />
-                  </div>
-                ))}
-              </div>
-              <div>
-                <label className="block font-medium mb-2">Pilihan pengambilan (satu baris satu pilihan)</label>
+              </label>
+              <label className="block">
+                <span className="block font-medium mb-2">Pilihan pengambilan (satu baris satu pilihan)</span>
                 <textarea
                   rows={3}
-                  value={(settings.pickup_options ?? []).join('\n')}
-                  onChange={e => setSettings(prev => prev ? { ...prev, pickup_options: e.target.value.split('\n') } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none resize-none"
+                  value={general.pickup_options}
+                  onChange={e => setGeneral(prev => ({ ...prev, pickup_options: e.target.value }))}
+                  className={`${inputClass} resize-none`}
                 />
-              </div>
-              <div>
-                <label className="block font-medium mb-2">URL gambar QRIS (kosongkan untuk /assets/qris.png)</label>
-                <input
-                  type="url"
-                  value={settings.qris_image_url || ''}
-                  onChange={e => setSettings(prev => prev ? { ...prev, qris_image_url: e.target.value } : null)}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none"
-                />
-              </div>
+              </label>
+              <p className="text-xs text-char/60">Password admin diatur lewat variabel ADMIN_PASSWORD di environment.</p>
               <button
-                onClick={updateSettings}
-                className="w-full py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all"
+                type="submit"
+                disabled={busy}
+                className="w-full py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
               >
-                Simpan Pengaturan
+                {busy ? 'Menyimpan…' : 'Simpan Pengaturan'}
               </button>
-            </div>
+            </form>
           </div>
         )}
       </main>
+      {noticeBanner}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-function getSupabaseUrl(): string {
+export function getSupabaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
     return url
@@ -12,18 +12,7 @@ function getSupabaseAnonKey(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
 }
 
-function getServiceRoleKey(): string {
-  return process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-role-key'
-}
-
 export const supabase = createClient(getSupabaseUrl(), getSupabaseAnonKey())
-
-export const supabaseAdmin = createClient(getSupabaseUrl(), getServiceRoleKey(), {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-})
 
 export const UPLOAD_BUCKET = 'order-uploads'
 
