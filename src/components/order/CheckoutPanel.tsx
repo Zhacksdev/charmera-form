@@ -40,6 +40,30 @@ export function CheckoutPanel({
   onEdit: (tab: Tab) => void
 }) {
   const [qrisMissing, setQrisMissing] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  // Paying from the same phone means scanning the QR from the gallery, so offer it as a file.
+  // `<a download>` is ignored for cross-origin URLs (Supabase Storage), hence the blob round trip.
+  async function downloadQris() {
+    setDownloading(true)
+    try {
+      const res = await fetch(qrisImage)
+      if (!res.ok) throw new Error(`QRIS ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `QRIS-Charmera.${blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      window.open(qrisImage, '_blank', 'noopener')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   function field(key: keyof CustomerInfo, label: string, input: React.InputHTMLAttributes<HTMLInputElement>) {
     return (
@@ -117,6 +141,17 @@ export function CheckoutPanel({
               <img src={qrisImage} alt="Kode QRIS Charmera" onError={() => setQrisMissing(true)} />
             )}
           </div>
+          {!qrisMissing && (
+            <>
+              <button type="button" className="pill qris-download" onClick={downloadQris} disabled={downloading}>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {downloading ? 'Menyiapkan…' : 'Download QRIS'}
+              </button>
+              <p className="muted hint">Bayar dari HP ini? Download QRIS-nya, lalu scan dari galeri di aplikasi e-wallet atau m-banking.</p>
+            </>
+          )}
           <p className="section-note">Bayar sesuai total: {formatRupiah(total)}</p>
         </section>
       </div>

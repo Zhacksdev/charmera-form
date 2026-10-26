@@ -4,14 +4,15 @@ import { useId, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { SHAPE_LABEL } from '@/lib/order'
 import type { KeychainDraft, KeychainShape, KeychainSide, SidePhoto } from '@/lib/order'
-import { KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, photoPlacement } from '@/lib/keychain'
+import { KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, newSidePhoto, photoPlacement } from '@/lib/keychain'
 import { validateImage } from '@/lib/uploads'
 import { Chevron, Stepper } from './parts'
 
 const SIDE_LABEL: Record<KeychainSide, string> = { front: 'Sisi depan', back: 'Sisi belakang' }
 
-export function KeychainBuilder({ draft, onChange, notify, aside }: {
+export function KeychainBuilder({ draft, shapes, onChange, notify, aside }: {
   draft: KeychainDraft
+  shapes: KeychainShape[]
   onChange: (draft: KeychainDraft) => void
   notify: (message: string) => void
   aside?: React.ReactNode
@@ -45,8 +46,7 @@ export function KeychainBuilder({ draft, onChange, notify, aside }: {
     try {
       const img = await loadImage(src)
       if (photo) URL.revokeObjectURL(photo.src)
-      const next: SidePhoto = { file, src, width: img.naturalWidth, height: img.naturalHeight, zoom: 1, dx: 0, dy: 0 }
-      onChange({ ...draft, photos: { ...draft.photos, [activeSide]: next } })
+      onChange({ ...draft, photos: { ...draft.photos, [activeSide]: newSidePhoto(file, src, img) } })
     } catch {
       URL.revokeObjectURL(src)
       notify('Foto ini tidak bisa dibuka. Coba foto lain, ya.')
@@ -204,7 +204,7 @@ export function KeychainBuilder({ draft, onChange, notify, aside }: {
         )}
 
         <div className="shape-options" role="radiogroup" aria-label="Bentuk keychain">
-          {(Object.keys(SHAPE_LABEL) as KeychainShape[]).map(s => (
+          {shapes.map(s => (
             <button
               key={s}
               type="button"

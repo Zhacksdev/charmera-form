@@ -21,6 +21,13 @@ import type { CheckoutErrors, CustomerInfo, ReceiptLine } from './CheckoutPanel'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const SETTINGS_COLUMNS = 'slot_count, batch_label, charm_price, custom_charm_price, keychain_price, keychain_double_price, pickup_options, qris_image_url'
+// Added later; read separately so the form keeps working before schema.sql is re-run.
+const NEWER_SETTINGS_COLUMNS = `${SETTINGS_COLUMNS}, keychain_shapes`
+
+async function loadSettings() {
+  const res = await supabase.from('settings').select(NEWER_SETTINGS_COLUMNS).limit(1).maybeSingle()
+  return res.error ? supabase.from('settings').select(SETTINGS_COLUMNS).limit(1).maybeSingle() : res
+}
 
 const EMPTY_CUSTOMER: CustomerInfo = { name: '', phone: '', email: '', instagram: '', pickup: '' }
 const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 1, photos: {} }
@@ -75,12 +82,13 @@ export function OrderForm() {
       const [pkgRes, charmRes, settingsRes] = await Promise.all([
         supabase.from('packages').select('*').eq('is_active', true).order('price'),
         supabase.from('charms').select('*').eq('is_active', true).order('sort_order'),
-        supabase.from('settings').select(SETTINGS_COLUMNS).limit(1).maybeSingle(),
+        loadSettings(),
       ])
       if (!mounted) return
       const nextConfig = toShopConfig(settingsRes.data)
       setConfig(nextConfig)
       setSlots(Array(nextConfig.slotCount).fill(null))
+      setKeychain(k => (nextConfig.keychainShapes.includes(k.shape) ? k : { ...k, shape: nextConfig.keychainShapes[0] }))
       if (pkgRes.data?.length) setPackages(pkgRes.data)
       // Older rows only have emoji; use the photo catalog until charms with images are added.
       const withArt = (charmRes.data ?? []).filter(c => c.image_url || c.catalog_index)
@@ -159,8 +167,11 @@ export function OrderForm() {
         const slotItems = await Promise.all(slots.map(async (pick, i) => {
           if (!pick) return null
           if (pick.kind === 'custom') {
-            const url = await uploadOrderFile(code, `charm-custom-${i + 1}`, pick.file)
-            return { position: i + 1, kind: 'custom', photo_url: url, price: config.customCharmPrice }
+            const [url, original] = await Promise.all([
+              uploadOrderFile(code, `charm-custom-${i + 1}`, pick.crop),
+              uploadOrderFile(code, `charm-custom-${i + 1}-original`, pick.photo.file),
+            ])
+            return { position: i + 1, kind: 'custom', photo_url: url, original_url: original, zoom: pick.photo.zoom, price: config.customCharmPrice }
           }
           const charm = charmsById.get(pick.charmId)
           return { position: i + 1, kind: 'catalog', charm_id: pick.charmId, name: charm?.name ?? null, image: charm?.image ?? null, price: charm?.price ?? config.charmPrice }
@@ -242,12 +253,16 @@ export function OrderForm() {
   }
 
   function startOver() {
-    for (const pick of slots) if (pick?.kind === 'custom') URL.revokeObjectURL(pick.preview)
+    for (const pick of slots) {
+      if (pick?.kind !== 'custom') continue
+      URL.revokeObjectURL(pick.preview)
+      URL.revokeObjectURL(pick.photo.src)
+    }
     for (const photo of Object.values(keychain.photos)) if (photo) URL.revokeObjectURL(photo.src)
     setPackageId('')
     setSlots(Array(config.slotCount).fill(null))
     setNote('')
-    setKeychain(EMPTY_KEYCHAIN)
+    setKeychain({ ...EMPTY_KEYCHAIN, shape: config.keychainShapes[0] })
     setCustomer(EMPTY_CUSTOMER)
     setProof(null)
     setErrors({})
@@ -313,7 +328,9 @@ export function OrderForm() {
               />
             )}
 
-            {tab === 'keychain' && <KeychainBuilder draft={keychain} onChange={setKeychain} notify={notify} aside={summary} />}
+            {tab === 'keychain' && (
+              <KeychainBuilder draft={keychain} shapes={config.keychainShapes} onChange={setKeychain} notify={notify} aside={summary} />
+            )}
 
             {tab === 'checkout' && (
               <CheckoutPanel

@@ -4,7 +4,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
-import { DEFAULT_CONFIG } from '@/lib/order'
+import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, SHAPE_LABEL } from '@/lib/order'
+import type { KeychainShape } from '@/lib/order'
 import {
   createQrisUpload, deleteCharm, deletePackage, hasSession, loadAdminData, login, logout,
   saveCharm, saveGeneralSettings, savePackage, savePrices, setQrisImage, updateOrderStatus,
@@ -42,6 +43,7 @@ interface SettingsDraft {
   slot_count: string
   whatsapp_number: string
   pickup_options: string
+  keychain_shapes: KeychainShape[]
 }
 
 const inputClass = 'w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none'
@@ -68,6 +70,9 @@ function settingsDraftFrom(settings: Settings | null): SettingsDraft {
     slot_count: String(settings?.slot_count ?? DEFAULT_CONFIG.slotCount),
     whatsapp_number: settings?.whatsapp_number ?? '',
     pickup_options: (settings?.pickup_options ?? DEFAULT_CONFIG.pickupOptions).join('\n'),
+    keychain_shapes: settings?.keychain_shapes?.length
+      ? KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes?.includes(s))
+      : DEFAULT_CONFIG.keychainShapes,
   }
 }
 
@@ -102,7 +107,7 @@ type OrderItem = {
   double_sided?: boolean
   quantity?: number
   subtotal?: number
-  slots?: ({ position: number; kind: string; name?: string | null; photo_url?: string } | null)[]
+  slots?: ({ position: number; kind: string; name?: string | null; photo_url?: string; original_url?: string } | null)[]
   sides?: { side: string; print_url: string; original_url: string }[]
 }
 
@@ -135,9 +140,15 @@ function OrderDetails({ order }: { order: Order }) {
               <ol className="mt-1 list-decimal pl-5">
                 {item.slots.map((slot, i) => slot && (
                   <li key={i} value={slot.position}>
-                    {slot.kind === 'custom'
-                      ? <a href={slot.photo_url} target="_blank" rel="noreferrer" className="underline">Charm custom (foto)</a>
-                      : slot.name}
+                    {slot.kind === 'custom' ? (
+                      <>
+                        Charm custom:{' '}
+                        <a href={slot.photo_url} target="_blank" rel="noreferrer" className="underline">siap cetak</a>
+                        {slot.original_url && (
+                          <>{' · '}<a href={slot.original_url} target="_blank" rel="noreferrer" className="underline">asli</a></>
+                        )}
+                      </>
+                    ) : slot.name}
                   </li>
                 ))}
               </ol>
@@ -267,6 +278,7 @@ export default function AdminPage() {
       slot_count: Number(general.slot_count),
       whatsapp_number: general.whatsapp_number,
       pickup_options: general.pickup_options.split('\n'),
+      keychain_shapes: general.keychain_shapes,
     }), 'Pengaturan disimpan.')
     if (ok) await refresh()
   }
@@ -982,6 +994,37 @@ export default function AdminPage() {
                   className={`${inputClass} resize-none`}
                 />
               </label>
+              <fieldset>
+                <legend className="font-medium mb-1">Bentuk keychain custom</legend>
+                <p className="text-xs text-char/60 mb-2">Bentuk yang nonaktif tidak bisa dipilih pelanggan. Minimal satu harus aktif.</p>
+                <div className="flex flex-wrap gap-2">
+                  {KEYCHAIN_SHAPE_IDS.map(shape => {
+                    const active = general.keychain_shapes.includes(shape)
+                    return (
+                      <label
+                        key={shape}
+                        className={`flex cursor-pointer items-center gap-2 rounded-full border-2 px-4 py-2 font-semibold transition-all ${
+                          active ? 'border-cherry bg-cherry text-cream' : 'border-line bg-cream text-char/60'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          onChange={e => setGeneral(prev => ({
+                            ...prev,
+                            keychain_shapes: e.target.checked
+                              ? KEYCHAIN_SHAPE_IDS.filter(s => s === shape || prev.keychain_shapes.includes(s))
+                              : prev.keychain_shapes.filter(s => s !== shape),
+                          }))}
+                          className="accent-cream"
+                        />
+                        {SHAPE_LABEL[shape]}
+                        <span className="text-xs font-normal">{active ? 'Aktif' : 'Nonaktif'}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </fieldset>
               <p className="text-xs text-char/60">Password admin diatur lewat variabel ADMIN_PASSWORD di environment.</p>
               <button
                 type="submit"

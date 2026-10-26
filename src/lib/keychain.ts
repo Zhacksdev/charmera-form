@@ -1,4 +1,5 @@
 import type { KeychainShape, SidePhoto } from './order'
+import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from './charm-catalog.generated'
 
 export interface Box {
   x: number
@@ -66,9 +67,29 @@ export function loadImage(src: string) {
   })
 }
 
+// The photo window of an Italian charm link, matching `.link-frame` padding (9% 8% of the tile width).
+export const CHARM_WINDOW: Box = {
+  x: 0,
+  y: 0,
+  w: CHARM_TILE_WIDTH * 0.84,
+  h: CHARM_TILE_HEIGHT - CHARM_TILE_WIDTH * 0.18,
+}
+
+export function newSidePhoto(file: File, src: string, img: HTMLImageElement): SidePhoto {
+  return { file, src, width: img.naturalWidth, height: img.naturalHeight, zoom: 1, dx: 0, dy: 0 }
+}
+
 // Render exactly what the customer sees inside the shape, at print resolution.
-export async function renderKeychainSide(shape: KeychainShape, photo: SidePhoto, outputWidth = 1200) {
+export function renderKeychainSide(shape: KeychainShape, photo: SidePhoto, outputWidth = 1200) {
   const { box, path } = KEYCHAIN_SHAPES[shape]
+  return renderPhoto(box, photo, outputWidth, path)
+}
+
+export function renderCharmPhoto(photo: SidePhoto, outputWidth = 800) {
+  return renderPhoto(CHARM_WINDOW, photo, outputWidth)
+}
+
+async function renderPhoto(box: Box, photo: SidePhoto, outputWidth: number, path?: string) {
   const k = outputWidth / box.w
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(box.w * k)
@@ -78,7 +99,7 @@ export async function renderKeychainSide(shape: KeychainShape, photo: SidePhoto,
   const img = await loadImage(photo.src)
   ctx.scale(k, k)
   ctx.translate(-box.x, -box.y)
-  ctx.clip(new Path2D(path))
+  if (path) ctx.clip(new Path2D(path))
   const p = photoPlacement(box, photo)
   ctx.drawImage(img, p.x, p.y, p.w, p.h)
   return new Promise<Blob>((resolve, reject) =>

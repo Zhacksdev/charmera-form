@@ -2,7 +2,9 @@
 // The SVGs embed multi-megabyte base64 PNGs, so serving them directly would make the page huge.
 //
 // Usage: node scripts/export-assets.mjs
-// Output: public/assets/*.webp, public/charms/catalog-XX.webp, src/lib/charm-catalog.generated.ts
+// Output: public/assets/*.webp, public/charms/catalog-XX.webp, src/lib/charm-catalog.generated.ts,
+//         src/app/icon.png and src/app/apple-icon.png (favicon, from the logo)
+// `node scripts/export-assets.mjs icons` only rebuilds the favicons.
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -149,5 +151,33 @@ export const CHARM_TILE_HEIGHT = ${tileH}
   console.log(`catalog: wrote ${n} tiles (${tileW}x${tileH}) to public/charms/`)
 }
 
-await exportIllustrations()
-await exportCharmCatalog()
+// Square favicons from the exported logo; Next.js serves src/app/icon.png and apple-icon.png automatically.
+async function exportIcons() {
+  // Crop to the solid badge so the soft drop shadow doesn't push it off-centre.
+  const { data, info } = await sharp(path.join(OUT, 'logo.webp')).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  let left = info.width, top = info.height, right = 0, bottom = 0
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * 4 + 3] < 200) continue
+      left = Math.min(left, x)
+      right = Math.max(right, x)
+      top = Math.min(top, y)
+      bottom = Math.max(bottom, y)
+    }
+  }
+  const logo = await sharp(path.join(OUT, 'logo.webp'))
+    .extract({ left, top, width: right - left + 1, height: bottom - top + 1 })
+    .toBuffer()
+  const square = (size, background) => sharp(logo).resize(size, size, { fit: 'contain', background })
+  await square(512, { r: 0, g: 0, b: 0, alpha: 0 }).png().toFile(path.join(ROOT, 'src', 'app', 'icon.png'))
+  // iOS shows transparent home screen icons on black, so give it the brand cream.
+  const cream = { r: 255, g: 244, b: 227 }
+  await square(180, { ...cream, alpha: 1 }).flatten({ background: cream }).png().toFile(path.join(ROOT, 'src', 'app', 'apple-icon.png'))
+  console.log('icons: wrote src/app/icon.png and src/app/apple-icon.png')
+}
+
+if (process.argv[2] !== 'icons') {
+  await exportIllustrations()
+  await exportCharmCatalog()
+}
+await exportIcons()

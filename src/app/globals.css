@@ -586,6 +586,46 @@ body {
 .bottom-cta { position: relative; }
 .bottom-mascot { position: absolute; right: -6px; bottom: 32px; width: 74px; height: auto; pointer-events: none; }
 
+/* Custom charm crop dialog */
+.crop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(38, 33, 31, .55);
+  animation: fade-in .15s ease;
+}
+.crop-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(100%, 400px);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px 18px 18px;
+  border: 3px solid var(--cherry);
+  border-radius: 22px;
+  background: var(--cream);
+  box-shadow: 0 16px 40px rgba(38, 33, 31, .3);
+}
+.crop-dialog:focus { outline: none; }
+.crop-dialog .hint { margin: 0; }
+.crop-frame { width: min(300px, 100%); }
+.crop-svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.crop-svg:active { cursor: grabbing; }
+.crop-zoom { width: min(100%, 240px); }
+.crop-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 4px; }
+.crop-buttons { display: flex; align-items: center; gap: 10px; }
+.crop-buttons .pill { padding: 8px 14px; }
+@keyframes fade-in { from { opacity: 0; } }
+
+.qris-download { display: inline-flex; align-items: center; gap: 6px; }
+.qris-download svg { width: 16px; height: 16px; }
+.qris-download:disabled { opacity: .6; }
+.qris .hint { margin: 0; max-width: 34ch; }
+
 /* Toast */
 .toast {
   position: fixed;

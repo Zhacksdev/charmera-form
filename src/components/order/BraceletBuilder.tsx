@@ -4,9 +4,11 @@ import { useRef, useState } from 'react'
 import Image from 'next/image'
 import type { Package } from '@/lib/supabase'
 import { formatRupiah, formatShortPrice, newUid } from '@/lib/order'
-import type { CharmPick, ShopCharm, ShopConfig } from '@/lib/order'
+import type { CharmPick, ShopCharm, ShopConfig, SidePhoto } from '@/lib/order'
+import { loadImage, newSidePhoto, renderCharmPhoto } from '@/lib/keychain'
 import { validateImage } from '@/lib/uploads'
 import { AddSlotButton, CharmArt, Chevron, PickArt, PhotoLink } from './parts'
+import { PhotoCropDialog } from './PhotoCropDialog'
 import { SlotBoard } from './SlotBoard'
 
 const PAGE_SIZE = 48
@@ -32,7 +34,8 @@ export function BraceletBuilder({
   const setsRef = useRef<HTMLDivElement>(null)
   const catalogRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const replaceTarget = useRef<string | null>(null)
+  // The custom charm being framed in the crop dialog; `uid` is null for a new upload.
+  const [editing, setEditing] = useState<{ uid: string | null; photo: SidePhoto } | null>(null)
 
   const pageCount = Math.max(1, Math.ceil(charms.length / PAGE_SIZE))
   const visibleCharms = charms.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
@@ -56,33 +59,77 @@ export function BraceletBuilder({
 
   function remove(uid: string) {
     const target = slots.find(s => s?.uid === uid)
-    if (target?.kind === 'custom') URL.revokeObjectURL(target.preview)
+    if (target?.kind === 'custom') {
+      URL.revokeObjectURL(target.preview)
+      URL.revokeObjectURL(target.photo.src)
+    }
     onSlotsChange(slots.map(s => (s?.uid === uid ? null : s)))
   }
 
-  function openPicker(replaceUid: string | null) {
-    replaceTarget.current = replaceUid
+  function committedSrc(uid: string | null) {
+    const pick = uid ? slots.find(s => s?.uid === uid) : null
+    return pick?.kind === 'custom' ? pick.photo.src : null
+  }
+
+  // Free a photo that only lived in the dialog, never one a slot still shows.
+  function discardDraft(draft: { uid: string | null; photo: SidePhoto }) {
+    if (draft.photo.src !== committedSrc(draft.uid)) URL.revokeObjectURL(draft.photo.src)
+  }
+
+  function uploadNew() {
+    if (!slots.includes(null)) {
+      notify(`Gelangmu cuma muat ${slots.length} charm. Lepas satu dulu, ya.`)
+      return
+    }
     fileRef.current?.click()
   }
 
-  function handleFile(file: File | undefined) {
+  async function handleFile(file: File | undefined) {
     if (!file) return
     const problem = validateImage(file)
     if (problem) {
       notify(problem)
       return
     }
-    const preview = URL.createObjectURL(file)
-    const replaceUid = replaceTarget.current
-    if (replaceUid) {
-      onSlotsChange(slots.map(s => {
-        if (s?.uid !== replaceUid || s.kind !== 'custom') return s
-        URL.revokeObjectURL(s.preview)
-        return { ...s, file, preview }
-      }))
-    } else if (!place({ uid: newUid(), kind: 'custom', file, preview })) {
-      URL.revokeObjectURL(preview)
+    const src = URL.createObjectURL(file)
+    try {
+      const photo = newSidePhoto(file, src, await loadImage(src))
+      if (editing) discardDraft(editing)
+      setEditing({ uid: editing?.uid ?? null, photo })
+    } catch {
+      URL.revokeObjectURL(src)
+      notify('Foto ini tidak bisa dibuka. Coba foto lain, ya.')
     }
+  }
+
+  function cancelEditing() {
+    if (editing) discardDraft(editing)
+    setEditing(null)
+  }
+
+  async function saveEditing() {
+    if (!editing) return
+    let crop: Blob
+    try {
+      crop = await renderCharmPhoto(editing.photo)
+    } catch {
+      notify('Foto gagal disiapkan. Coba lagi, ya.')
+      return
+    }
+    const preview = URL.createObjectURL(crop)
+    const { uid, photo } = editing
+    if (uid) {
+      onSlotsChange(slots.map(s => {
+        if (s?.uid !== uid || s.kind !== 'custom') return s
+        URL.revokeObjectURL(s.preview)
+        if (s.photo.src !== photo.src) URL.revokeObjectURL(s.photo.src)
+        return { ...s, photo, crop, preview }
+      }))
+    } else if (!place({ uid: newUid(), kind: 'custom', photo, crop, preview })) {
+      URL.revokeObjectURL(preview)
+      URL.revokeObjectURL(photo.src)
+    }
+    setEditing(null)
   }
 
   function scrollSets(toPage: number) {
@@ -188,16 +235,21 @@ export function BraceletBuilder({
             <div className="custom-list">
               {customPicks.map(pick => (
                 <span key={pick.uid} className="picked-item">
-                  <button type="button" className="custom-photo-btn" onClick={() => openPicker(pick.uid)} aria-label="Ganti foto charm custom">
+                  <button
+                    type="button"
+                    className="custom-photo-btn"
+                    onClick={() => pick.kind === 'custom' && setEditing({ uid: pick.uid, photo: pick.photo })}
+                    aria-label="Atur posisi foto charm custom"
+                  >
                     <PhotoLink src={pick.kind === 'custom' ? pick.preview : undefined} alt="Charm custom" />
                   </button>
                   <button type="button" className="remove-dot" onClick={() => remove(pick.uid)} aria-label="Hapus charm custom">×</button>
                 </span>
               ))}
-              <AddSlotButton onClick={() => openPicker(null)} label="Upload Foto Charm" />
+              <AddSlotButton onClick={uploadNew} label="Upload Foto Charm" />
             </div>
           </div>
-          <p className="muted hint">Foto akan dipotong mengikuti bentuk charm. Pilih foto yang wajahnya di tengah.</p>
+          <p className="muted hint">Setelah upload, atur posisi dan zoom foto supaya pas di charm. Ketuk fotonya untuk mengatur ulang.</p>
           <input
             ref={fileRef}
             type="file"
@@ -233,6 +285,16 @@ export function BraceletBuilder({
         </section>
         {aside}
       </div>
+
+      {editing && (
+        <PhotoCropDialog
+          photo={editing.photo}
+          onChange={photo => setEditing(prev => (prev ? { ...prev, photo } : prev))}
+          onSave={saveEditing}
+          onCancel={cancelEditing}
+          onReplace={() => fileRef.current?.click()}
+        />
+      )}
     </div>
   )
 }

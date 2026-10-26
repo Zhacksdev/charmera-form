@@ -107,6 +107,7 @@ export type Database = {
           keychain_double_price?: number | null
           pickup_options?: string[] | null
           qris_image_url?: string | null
+          keychain_shapes?: string[] | null
           created_at: string
           updated_at: string
         }
@@ -122,6 +123,7 @@ export type Database = {
           keychain_double_price?: number | null
           pickup_options?: string[] | null
           qris_image_url?: string | null
+          keychain_shapes?: string[] | null
           created_at?: string
           updated_at?: string
         }
@@ -137,6 +139,7 @@ export type Database = {
           keychain_double_price?: number | null
           pickup_options?: string[] | null
           qris_image_url?: string | null
+          keychain_shapes?: string[] | null
           created_at?: string
           updated_at?: string
         }

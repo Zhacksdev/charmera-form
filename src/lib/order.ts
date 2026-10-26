@@ -20,14 +20,13 @@ export interface ShopConfig {
   keychainDoublePrice: number
   pickupOptions: string[]
   qrisImage: string
+  keychainShapes: KeychainShape[]
 }
-
-export type CharmPick =
-  | { uid: string; kind: 'catalog'; charmId: string }
-  | { uid: string; kind: 'custom'; file: File; preview: string }
 
 export type KeychainShape = 'rect' | 'square' | 'heart'
 export type KeychainSide = 'front' | 'back'
+
+export const KEYCHAIN_SHAPE_IDS: KeychainShape[] = ['rect', 'square', 'heart']
 
 export interface SidePhoto {
   file: File
@@ -38,6 +37,11 @@ export interface SidePhoto {
   dx: number
   dy: number
 }
+
+// `photo` keeps the original upload and its framing; `crop` is what fits the charm window.
+export type CharmPick =
+  | { uid: string; kind: 'catalog'; charmId: string }
+  | { uid: string; kind: 'custom'; photo: SidePhoto; crop: Blob; preview: string }
 
 export interface KeychainDraft {
   shape: KeychainShape
@@ -55,6 +59,7 @@ export const DEFAULT_CONFIG: ShopConfig = {
   keychainDoublePrice: 10000,
   pickupOptions: ['Ambil di booth Charmera', 'Dikirim (ongkir dikonfirmasi via WhatsApp)'],
   qrisImage: '/assets/qris.png',
+  keychainShapes: KEYCHAIN_SHAPE_IDS,
 }
 
 // Placeholder sets shown until packages are filled in Supabase. Prices are examples only.
@@ -89,6 +94,7 @@ export function toShopCharm(charm: Charm, fallbackPrice: number, position: numbe
 
 export function toShopConfig(settings: Partial<Settings> | null): ShopConfig {
   if (!settings) return DEFAULT_CONFIG
+  const shapes = KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes?.includes(s))
   return {
     batchLabel: settings.batch_label || DEFAULT_CONFIG.batchLabel,
     slotCount: settings.slot_count || DEFAULT_CONFIG.slotCount,
@@ -98,6 +104,7 @@ export function toShopConfig(settings: Partial<Settings> | null): ShopConfig {
     keychainDoublePrice: settings.keychain_double_price ?? DEFAULT_CONFIG.keychainDoublePrice,
     pickupOptions: settings.pickup_options?.length ? settings.pickup_options : DEFAULT_CONFIG.pickupOptions,
     qrisImage: settings.qris_image_url || DEFAULT_CONFIG.qrisImage,
+    keychainShapes: shapes.length ? shapes : DEFAULT_CONFIG.keychainShapes,
   }
 }
 

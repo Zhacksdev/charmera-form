@@ -6,6 +6,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { UPLOAD_BUCKET } from '@/lib/supabase'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
+import { KEYCHAIN_SHAPE_IDS } from '@/lib/order'
+import type { KeychainShape } from '@/lib/order'
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -34,6 +36,7 @@ export interface GeneralSettings {
   slot_count: number
   whatsapp_number: string | null
   pickup_options: string[]
+  keychain_shapes: KeychainShape[]
 }
 
 const COOKIE = 'charmera_admin'
@@ -162,11 +165,14 @@ export async function savePrices(update: PriceUpdate): Promise<Result> {
 
 export async function saveGeneralSettings(settings: GeneralSettings): Promise<Result> {
   return guarded(async () => {
+    const shapes = KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes.includes(s))
+    if (shapes.length === 0) return fail('Aktifkan minimal satu bentuk keychain.')
     const { error } = await supabaseAdmin.from('settings').update({
       batch_label: settings.batch_label?.trim() || null,
       slot_count: Math.min(30, Math.max(1, Math.round(Number(settings.slot_count)) || 9)),
       whatsapp_number: settings.whatsapp_number?.replace(/\D/g, '') || null,
       pickup_options: settings.pickup_options.map(o => o.trim()).filter(Boolean),
+      keychain_shapes: shapes,
       updated_at: new Date().toISOString(),
     }).eq('id', 1)
     return error ? fail(error.message) : { ok: true, data: null }
