@@ -649,6 +649,22 @@ body {
 .success { display: grid; justify-items: center; gap: 12px; text-align: center; padding: 24px 0 40px; }
 .success img { width: min(220px, 60vw); height: auto; }
 .success p { margin: 0; max-width: 40ch; color: var(--char); }
+.success-box {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 460px);
+  padding: 16px 18px;
+  border: 2px dashed var(--cherry);
+  border-radius: 16px;
+  background: var(--card);
+  text-align: left;
+}
+.success-box.is-announce { border-style: solid; background: var(--butter); justify-items: start; }
+.success-box p, .success-box ol { margin: 0; max-width: none; color: var(--char); font-size: 14px; }
+.success-box ol { padding-left: 20px; display: grid; gap: 4px; }
+.success-box a:not(.btn-primary) { color: var(--cherry); font-weight: 700; }
+.success-wa { display: inline-block; margin-top: 4px; font-size: 16px; text-decoration: none; }
+.success-box .success-warning { color: var(--cherry); font-weight: 700; }
 .order-code { font-family: ui-monospace, Menlo, monospace; font-weight: 700; background: var(--card); border: 2px dashed var(--cherry); border-radius: 12px; padding: 8px 14px; color: var(--cherry); }
 
 .shop-footer { margin-top: 40px; text-align: center; color: var(--cherry); font-weight: 700; font-size: 13px; }

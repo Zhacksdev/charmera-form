@@ -16,13 +16,15 @@ import { BraceletBuilder } from './BraceletBuilder'
 import { KeychainBuilder } from './KeychainBuilder'
 import { CheckoutPanel } from './CheckoutPanel'
 import { SummaryCard } from './SummaryCard'
+import { SuccessPanel } from './SuccessPanel'
+import type { CompletedOrder } from './SuccessPanel'
 import type { CheckoutErrors, CustomerInfo, ReceiptLine } from './CheckoutPanel'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const SETTINGS_COLUMNS = 'slot_count, batch_label, charm_price, custom_charm_price, keychain_price, keychain_double_price, pickup_options, qris_image_url'
 // Added later; read separately so the form keeps working before schema.sql is re-run.
-const NEWER_SETTINGS_COLUMNS = `${SETTINGS_COLUMNS}, keychain_shapes`
+const NEWER_SETTINGS_COLUMNS = `${SETTINGS_COLUMNS}, keychain_shapes, whatsapp_number, instagram_username, tiktok_username`
 
 async function loadSettings() {
   const res = await supabase.from('settings').select(NEWER_SETTINGS_COLUMNS).limit(1).maybeSingle()
@@ -55,7 +57,7 @@ export function OrderForm() {
   const [errors, setErrors] = useState<CheckoutErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [completed, setCompleted] = useState<{ code: string; name: string } | null>(null)
+  const [completed, setCompleted] = useState<CompletedOrder | null>(null)
 
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -242,7 +244,7 @@ export function OrderForm() {
       const { error } = await supabase.from('orders').insert(order)
       if (error) throw error
 
-      setCompleted({ code, name: customer.name.trim() })
+      setCompleted({ code, name: customer.name.trim(), total })
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (error) {
       console.error(error)
@@ -282,14 +284,7 @@ export function OrderForm() {
         </header>
 
         {completed ? (
-          <section className="success" aria-live="polite">
-            <Image src="/assets/maskot-thx.webp" alt="" width={431} height={482} />
-            <h2 className="bubble-title is-section">Makasih, {completed.name}!</h2>
-            <p>Pesananmu sudah masuk. Kami cek pembayaranmu dulu, lalu kabari lewat WhatsApp.</p>
-            <p className="order-code">{completed.code}</p>
-            <p className="muted">Simpan kode ini kalau mau tanya soal pesananmu.</p>
-            <button type="button" className="btn-primary" onClick={startOver}>Buat pesanan baru</button>
-          </section>
+          <SuccessPanel order={completed} config={config} onStartOver={startOver} />
         ) : (
           <>
             <nav ref={tabsRef} className="tabs" aria-label="Langkah pemesanan">

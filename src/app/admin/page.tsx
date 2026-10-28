@@ -4,15 +4,17 @@
 import { Fragment, useEffect, useState } from 'react'
 import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
-import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, SHAPE_LABEL } from '@/lib/order'
+import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL } from '@/lib/order'
 import type { KeychainShape } from '@/lib/order'
 import {
-  createQrisUpload, deleteCharm, deletePackage, hasSession, loadAdminData, login, logout,
-  saveCharm, saveGeneralSettings, savePackage, savePrices, setQrisImage, updateOrderStatus,
+  createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
+  saveCharm, saveGeneralSettings, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
 } from './actions'
 import type { Result } from './actions'
+import { csvToOrders, orderTemplateCsv, ordersToCsv } from './orders-csv'
+import { downloadFile } from '@/lib/csv'
 
-const ORDER_STATUSES = ['Menunggu verifikasi', 'Menunggu bayar', 'Terbayar', 'Diproses', 'Selesai']
+const IMPORT_CHUNK = 200
 const MAX_QR_BYTES = 5 * 1024 * 1024
 
 type Tab = 'orders' | 'prices' | 'packages' | 'charms' | 'settings'
@@ -44,8 +46,11 @@ interface SettingsDraft {
   whatsapp_number: string
   pickup_options: string
   keychain_shapes: KeychainShape[]
+  instagram_username: string
+  tiktok_username: string
 }
 
+const secondaryButton = 'px-4 py-2 rounded-full border-2 border-cherry text-cherry font-semibold hover:bg-rose/30 transition-all'
 const inputClass = 'w-full px-4 py-3 rounded-xl border border-line bg-cream focus:border-cherry focus:outline-none'
 
 function toText(value: number | null | undefined) {
@@ -73,6 +78,8 @@ function settingsDraftFrom(settings: Settings | null): SettingsDraft {
     keychain_shapes: settings?.keychain_shapes?.length
       ? KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes?.includes(s))
       : DEFAULT_CONFIG.keychainShapes,
+    instagram_username: settings?.instagram_username ?? '',
+    tiktok_username: settings?.tiktok_username ?? '',
   }
 }
 
@@ -185,6 +192,7 @@ export default function AdminPage() {
   const [editingPkg, setEditingPkg] = useState<Partial<Package> | null>(null)
   const [editingCharm, setEditingCharm] = useState<Partial<Charm> | null>(null)
   const [openOrder, setOpenOrder] = useState<string | null>(null)
+  const [editingOrder, setEditingOrder] = useState<Partial<Order> | null>(null)
   const [qrFile, setQrFile] = useState<File | null>(null)
   const [qrPreview, setQrPreview] = useState<string | null>(null)
 
@@ -279,6 +287,8 @@ export default function AdminPage() {
       whatsapp_number: general.whatsapp_number,
       pickup_options: general.pickup_options.split('\n'),
       keychain_shapes: general.keychain_shapes,
+      instagram_username: general.instagram_username,
+      tiktok_username: general.tiktok_username,
     }), 'Pengaturan disimpan.')
     if (ok) await refresh()
   }
@@ -346,7 +356,70 @@ export default function AdminPage() {
 
   async function handleDeleteCharm(id: string) {
     if (!confirm('Hapus charm ini?')) return
-    if (await run(() => deleteCharm(id), 'Charm dihapus.')) await refresh()
+    if (await run(() => deleteCharm(id), 'Charm dihapus.')) {
+      setEditingCharm(null)
+      await refresh()
+    }
+  }
+
+  async function handleImportDefaults() {
+    const result = await run(() => importDefaultCatalog())
+    if (!result?.ok) return
+    const { packages: p, charms: c } = result.data
+    setNotice({
+      type: 'ok',
+      text: p || c ? `Data bawaan dimasukkan: ${p} paket, ${c} charm.` : 'Database sudah berisi data, tidak ada yang ditambahkan.',
+    })
+    await refresh()
+  }
+
+  async function handleSaveOrder() {
+    if (!editingOrder) return
+    if (await run(() => saveOrder(editingOrder), 'Pesanan disimpan.')) {
+      setEditingOrder(null)
+      await refresh()
+    }
+  }
+
+  async function handleDeleteOrder(order: Order) {
+    if (!confirm(`Hapus pesanan ${order.order_code || order.customer_name}? Ini tidak bisa dibatalkan.`)) return
+    if (await run(() => deleteOrder(order.id), 'Pesanan dihapus.')) {
+      setOrders(prev => prev.filter(o => o.id !== order.id))
+    }
+  }
+
+  function handleExportOrders() {
+    const stamp = new Date().toISOString().slice(0, 10)
+    downloadFile(`pesanan-charmera-${stamp}.csv`, ordersToCsv(orders))
+  }
+
+  async function handleImportOrders(file: File | undefined) {
+    if (!file) return
+    let parsed: ReturnType<typeof csvToOrders>
+    try {
+      parsed = csvToOrders(await file.text())
+    } catch (error) {
+      return setNotice({ type: 'error', text: error instanceof Error ? error.message : 'File CSV tidak bisa dibaca.' })
+    }
+    if (parsed.rows.length === 0) return setNotice({ type: 'error', text: 'Tidak ada baris pesanan yang bisa diimpor.' })
+    if (!confirm(`Impor ${parsed.rows.length} pesanan dari ${file.name}? Pesanan dengan kode yang sama akan diperbarui.`)) return
+
+    setBusy(true)
+    let added = 0
+    let updated = 0
+    try {
+      for (let i = 0; i < parsed.rows.length; i += IMPORT_CHUNK) {
+        const result = await importOrders(parsed.rows.slice(i, i + IMPORT_CHUNK))
+        if (!show(result) || !result.ok) return
+        added += result.data.added
+        updated += result.data.updated
+      }
+      const skipped = parsed.skipped ? `, ${parsed.skipped} baris tanpa nama dilewati` : ''
+      setNotice({ type: 'ok', text: `Impor selesai: ${added} ditambah, ${updated} diperbarui${skipped}.` })
+    } finally {
+      setBusy(false)
+      await refresh()
+    }
   }
 
   const noticeBanner = notice && (
@@ -403,6 +476,24 @@ export default function AdminPage() {
   const unitFallbacks = Object.fromEntries(UNIT_PRICES.map(u => [u.key, u.fallback])) as Record<UnitKey, number>
   const defaultCharmPrice = toNumber(prices.unit.charm_price) ?? unitFallbacks.charm_price
   const currentQr = qrPreview ?? settings?.qris_image_url ?? null
+  const usingDefaultPackages = packages.length === 0
+  const usingDefaultCharms = !charms.some(c => c.image_url || c.catalog_index)
+  const defaultsBanner = (usingDefaultPackages || usingDefaultCharms) && (
+    <div className="rounded-2xl border-2 border-dashed border-cherry bg-butter/40 p-4 flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm max-w-xl">
+        Form pelanggan sekarang menampilkan data bawaan
+        {usingDefaultPackages && usingDefaultCharms ? ' (3 paket contoh dan 64 charm katalog)' : usingDefaultPackages ? ' (3 paket contoh)' : ' (64 charm katalog)'}
+        {' '}yang belum ada di database. Masukkan ke database supaya bisa diedit, dinonaktifkan, atau dihapus dari sini.
+      </p>
+      <button
+        onClick={handleImportDefaults}
+        disabled={busy}
+        className="px-4 py-2 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
+      >
+        Masukkan data bawaan
+      </button>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-cream">
@@ -448,6 +539,40 @@ export default function AdminPage() {
               ))}
             </div>
 
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-char/70">{orders.length} pesanan</p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => downloadFile('template-pesanan-charmera.csv', orderTemplateCsv())} className={secondaryButton}>
+                  Template CSV
+                </button>
+                <label className={`${secondaryButton} cursor-pointer ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                  {busy ? 'Memproses…' : 'Impor CSV'}
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    hidden
+                    onChange={e => {
+                      handleImportOrders(e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                <button onClick={handleExportOrders} disabled={orders.length === 0} className={`${secondaryButton} disabled:opacity-50`}>
+                  Ekspor CSV
+                </button>
+                <button
+                  onClick={() => setEditingOrder({ customer_name: '', status: ORDER_STATUSES[0], quantity: 1, total_price: 0 })}
+                  className="px-4 py-2 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all"
+                >
+                  + Tambah Pesanan
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-char/60">
+              Impor menambah pesanan dari file CSV (bisa dari Excel). Kolom wajib: Nama. Baris dengan Kode yang sudah ada akan memperbarui pesanan itu.
+              Pakai Template CSV atau hasil Ekspor sebagai contoh format.
+            </p>
+
             <div className="bg-card rounded-2xl border border-line overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -461,11 +586,12 @@ export default function AdminPage() {
                       <th className="text-left p-3">Total</th>
                       <th className="text-left p-3">Status</th>
                       <th className="text-left p-3">Tanggal</th>
+                      <th className="p-3"><span className="sr-only">Aksi</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length === 0 && (
-                      <tr><td colSpan={8} className="p-6 text-center text-char/60">Belum ada pesanan.</td></tr>
+                      <tr><td colSpan={9} className="p-6 text-center text-char/60">Belum ada pesanan.</td></tr>
                     )}
                     {orders.map(order => (
                       <Fragment key={order.id}>
@@ -498,10 +624,20 @@ export default function AdminPage() {
                           <td className="p-3 text-xs text-char/70">
                             {new Date(order.created_at).toLocaleDateString('id')}
                           </td>
+                          <td className="p-3">
+                            <div className="flex justify-end gap-1">
+                              <button onClick={() => setEditingOrder({ ...order, pickup_method: order.pickup_method || order.customer_address })}className="px-3 py-1 text-xs bg-sky/30 rounded-full hover:bg-sky/50">
+                                Edit
+                              </button>
+                              <button onClick={() => handleDeleteOrder(order)} className="px-3 py-1 text-xs bg-rose/50 rounded-full hover:bg-rose">
+                                Hapus
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                         {openOrder === order.id && (
                           <tr className="bg-cream/60">
-                            <td colSpan={8} className="p-4">
+                            <td colSpan={9} className="p-4">
                               <OrderDetails order={order} />
                             </td>
                           </tr>
@@ -512,6 +648,99 @@ export default function AdminPage() {
                 </table>
               </div>
             </div>
+
+            {editingOrder && (
+              <div className="fixed inset-0 bg-char/50 flex items-center justify-center p-4 z-50">
+                <form
+                  className="bg-card rounded-2xl p-6 w-full max-w-lg border border-line max-h-full overflow-y-auto"
+                  onSubmit={e => {
+                    e.preventDefault()
+                    handleSaveOrder()
+                  }}
+                >
+                  <h3 className="font-display text-xl font-semibold mb-4">
+                    {editingOrder.id ? `Edit Pesanan ${editingOrder.order_code ?? ''}` : 'Tambah Pesanan'}
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {([
+                      ['order_code', 'Kode pesanan', 'text', 'Kosongkan untuk dibuat otomatis'],
+                      ['customer_name', 'Nama', 'text', ''],
+                      ['customer_whatsapp', 'WhatsApp', 'tel', '08xxxxxxxxxx'],
+                      ['customer_email', 'Email', 'email', ''],
+                      ['customer_instagram', 'Instagram', 'text', '@username'],
+                      ['pickup_method', 'Pengambilan', 'text', ''],
+                      ['package_name', 'Pesanan', 'text', 'Italian Charm (Daily Set)'],
+                    ] as const).map(([key, label, type, placeholder]) => (
+                      <label key={key} className={`block text-sm ${key === 'package_name' ? 'sm:col-span-2' : ''}`}>
+                        {label}
+                        <input
+                          type={type}
+                          placeholder={placeholder}
+                          disabled={key === 'order_code' && Boolean(editingOrder.id)}
+                          required={key === 'customer_name'}
+                          value={editingOrder[key] ?? ''}
+                          onChange={e => setEditingOrder(prev => (prev ? { ...prev, [key]: e.target.value } : null))}
+                          className={`mt-1 ${inputClass} disabled:opacity-60`}
+                        />
+                      </label>
+                    ))}
+                    <label className="block text-sm">
+                      Qty
+                      <input
+                        type="number"
+                        min={1}
+                        value={editingOrder.quantity ?? 1}
+                        onChange={e => setEditingOrder(prev => (prev ? { ...prev, quantity: parseInt(e.target.value) || 1 } : null))}
+                        className={`mt-1 ${inputClass}`}
+                      />
+                    </label>
+                    <label className="block text-sm">
+                      Total
+                      <PriceInput
+                        label="Total"
+                        value={toText(editingOrder.total_price)}
+                        onChange={value => setEditingOrder(prev => (prev ? { ...prev, total_price: toNumber(value) ?? 0 } : null))}
+                      />
+                    </label>
+                    <label className="block text-sm sm:col-span-2">
+                      Status
+                      <select
+                        value={editingOrder.status ?? ORDER_STATUSES[0]}
+                        onChange={e => setEditingOrder(prev => (prev ? { ...prev, status: e.target.value } : null))}
+                        className={`mt-1 ${inputClass}`}
+                      >
+                        {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-sm sm:col-span-2">
+                      Catatan
+                      <textarea
+                        rows={2}
+                        value={editingOrder.notes ?? ''}
+                        onChange={e => setEditingOrder(prev => (prev ? { ...prev, notes: e.target.value } : null))}
+                        className={`mt-1 ${inputClass} resize-none`}
+                      />
+                    </label>
+                  </div>
+                  <div className="flex gap-2 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setEditingOrder(null)}
+                      className="flex-1 py-3 bg-char/10 rounded-full font-semibold hover:bg-char/20 transition-all"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={busy}
+                      className="flex-1 py-3 bg-cherry text-cream font-semibold rounded-full hover:bg-cherry/90 transition-all disabled:opacity-50"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
           </div>
         )}
 
@@ -601,7 +830,7 @@ export default function AdminPage() {
               {charms.length === 0 ? (
                 <p className="text-sm text-char/60">
                   Belum ada charm di database, jadi form memakai 64 charm katalog bawaan dengan harga charm biasa.
-                  Tambahkan charm di tab Charm untuk memberi harga khusus.
+                  Klik tombol Masukkan data bawaan di tab Charm untuk memberi harga khusus.
                 </p>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -642,6 +871,7 @@ export default function AdminPage() {
 
         {tab === 'packages' && (
           <div className="space-y-4">
+            {usingDefaultPackages && defaultsBanner}
             <div className="flex justify-end">
               <button
                 onClick={() => setEditingPkg({ name: '', price: 0, items: [], included_charms: 0, is_active: true })}
@@ -758,6 +988,7 @@ export default function AdminPage() {
 
         {tab === 'charms' && (
           <div className="space-y-4">
+            {usingDefaultCharms && defaultsBanner}
             <div className="flex justify-end">
               <button
                 onClick={() => setEditingCharm({ emoji: '', sort_order: 0, is_active: true })}
@@ -768,14 +999,18 @@ export default function AdminPage() {
             </div>
 
             <div className="bg-card rounded-2xl border border-line p-4">
-              {charms.length === 0 && (
-                <p className="text-sm text-char/60">Belum ada charm. Form memakai 64 charm katalog bawaan.</p>
-              )}
+              {charms.length === 0 && <p className="text-sm text-char/60">Belum ada charm di database.</p>}
+              {charms.length > 0 && <p className="text-xs text-char/60 mb-3">Klik charm untuk mengedit atau menghapus.</p>}
               <div className="flex flex-wrap gap-3">
                 {charms.map(charm => (
-                  <div key={charm.id} className="relative group">
+                  <button
+                    key={charm.id}
+                    onClick={() => setEditingCharm(charm)}
+                    className="w-16 rounded-xl hover:ring-2 hover:ring-cherry focus-visible:ring-2 focus-visible:ring-cherry"
+                    aria-label={`Edit ${charm.name || 'charm'}`}
+                  >
                     <div
-                      className={`w-16 h-16 rounded-xl text-3xl flex items-center justify-center ${
+                      className={`relative w-16 h-16 rounded-xl text-3xl flex items-center justify-center ${
                         charm.is_active ? 'bg-rose' : 'bg-char/10 opacity-50'
                       }`}
                     >
@@ -786,28 +1021,15 @@ export default function AdminPage() {
                           className="w-full h-full object-contain"
                         />
                       ) : charm.emoji}
+                      {!charm.is_active && (
+                        <span className="absolute bottom-0.5 rounded-full bg-char px-1.5 text-[9px] font-semibold text-cream">Nonaktif</span>
+                      )}
                     </div>
-                    <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-1">
-                      <button
-                        onClick={() => setEditingCharm(charm)}
-                        className="w-6 h-6 bg-sky rounded-full text-xs flex items-center justify-center"
-                        aria-label="Edit charm"
-                      >
-                        ✎
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCharm(charm.id)}
-                        className="w-6 h-6 bg-rose rounded-full text-xs flex items-center justify-center"
-                        aria-label="Hapus charm"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    {charm.name && <p className="text-xs text-center mt-1 text-char/70">{charm.name}</p>}
+                    {charm.name && <span className="block text-xs text-center mt-1 text-char/70 truncate">{charm.name}</span>}
                     {charm.price != null && (
-                      <p className="text-[10px] text-center text-cherry font-semibold">Rp {charm.price.toLocaleString('id')}</p>
+                      <span className="block text-[10px] text-center text-cherry font-semibold">Rp {charm.price.toLocaleString('id')}</span>
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -889,6 +1111,15 @@ export default function AdminPage() {
                       Simpan
                     </button>
                   </div>
+                  {editingCharm.id && (
+                    <button
+                      onClick={() => handleDeleteCharm(editingCharm.id!)}
+                      disabled={busy}
+                      className="mt-3 w-full py-2 text-sm font-semibold text-cherry underline disabled:opacity-50"
+                    >
+                      Hapus charm ini
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -984,7 +1215,35 @@ export default function AdminPage() {
                   onChange={e => setGeneral(prev => ({ ...prev, whatsapp_number: e.target.value }))}
                   className={inputClass}
                 />
+                <span className="block text-xs text-char/60 mt-1">Dipakai tombol konfirmasi pembayaran di halaman terima kasih.</span>
               </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="block font-medium mb-2">Username Instagram</span>
+                  <input
+                    type="text"
+                    autoCapitalize="none"
+                    placeholder="@charmera"
+                    value={general.instagram_username}
+                    onChange={e => setGeneral(prev => ({ ...prev, instagram_username: e.target.value }))}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block font-medium mb-2">Username TikTok</span>
+                  <input
+                    type="text"
+                    autoCapitalize="none"
+                    placeholder="@charmera"
+                    value={general.tiktok_username}
+                    onChange={e => setGeneral(prev => ({ ...prev, tiktok_username: e.target.value }))}
+                    className={inputClass}
+                  />
+                </label>
+                <span className="block text-xs text-char/60 sm:col-span-2 -mt-2">
+                  Ditampilkan di syarat garansi pada halaman terima kasih.
+                </span>
+              </div>
               <label className="block">
                 <span className="block font-medium mb-2">Pilihan pengambilan (satu baris satu pilihan)</span>
                 <textarea

@@ -5,8 +5,9 @@ import { cookies } from 'next/headers'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { UPLOAD_BUCKET } from '@/lib/supabase'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import type { Charm, Order, Package, Settings } from '@/lib/supabase'
-import { KEYCHAIN_SHAPE_IDS } from '@/lib/order'
+import type { Charm, Order, OrderInsert, Package, Settings } from '@/lib/supabase'
+import { FALLBACK_PACKAGES, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, newOrderCode } from '@/lib/order'
+import { CHARM_CATALOG_COUNT } from '@/lib/charm-catalog.generated'
 import type { KeychainShape } from '@/lib/order'
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string }
@@ -37,11 +38,12 @@ export interface GeneralSettings {
   whatsapp_number: string | null
   pickup_options: string[]
   keychain_shapes: KeychainShape[]
+  instagram_username: string | null
+  tiktok_username: string | null
 }
 
 const COOKIE = 'charmera_admin'
 const SESSION_DAYS = 7
-const ORDER_STATUSES = ['Menunggu verifikasi', 'Menunggu bayar', 'Terbayar', 'Diproses', 'Selesai']
 
 function fail(error: string): Result<never> {
   return { ok: false, error }
@@ -79,6 +81,12 @@ async function guarded<T>(run: () => Promise<Result<T>>): Promise<Result<T>> {
 function price(value: unknown): number | null {
   const n = Math.round(Number(value))
   return Number.isFinite(n) && n >= 0 && value !== '' && value !== null ? n : null
+}
+
+// Accept "@name" or a pasted profile URL and keep just the name.
+function username(value: string | null) {
+  const name = value?.trim().split('?')[0].replace(/\/+$/, '').split('/').pop()?.replace(/^@/, '')
+  return name || null
 }
 
 export async function login(password: string): Promise<Result> {
@@ -173,6 +181,8 @@ export async function saveGeneralSettings(settings: GeneralSettings): Promise<Re
       whatsapp_number: settings.whatsapp_number?.replace(/\D/g, '') || null,
       pickup_options: settings.pickup_options.map(o => o.trim()).filter(Boolean),
       keychain_shapes: shapes,
+      instagram_username: username(settings.instagram_username),
+      tiktok_username: username(settings.tiktok_username),
       updated_at: new Date().toISOString(),
     }).eq('id', 1)
     return error ? fail(error.message) : { ok: true, data: null }
@@ -247,5 +257,147 @@ export async function deleteCharm(id: string): Promise<Result> {
   return guarded(async () => {
     const { error } = await supabaseAdmin.from('charms').delete().eq('id', id)
     return error ? fail(error.message) : { ok: true, data: null }
+  })
+}
+
+// Copy the built-in packages and the 64-charm photo catalog into the database so they can be edited here.
+// Only fills a table that has nothing the form would show yet, so it never duplicates admin data.
+export async function importDefaultCatalog(): Promise<Result<{ packages: number; charms: number }>> {
+  return guarded(async () => {
+    const [pkgRes, charmRes] = await Promise.all([
+      supabaseAdmin.from('packages').select('id', { count: 'exact', head: true }),
+      supabaseAdmin.from('charms').select('id, image_url, catalog_index'),
+    ])
+    const error = pkgRes.error ?? charmRes.error
+    if (error) return fail(`Gagal memeriksa data: ${error.message}`)
+
+    let packages = 0
+    if (!pkgRes.count) {
+      const rows = FALLBACK_PACKAGES.map((p, i) => ({
+        name: p.name,
+        price: p.price,
+        items: p.items ?? [],
+        included_charms: p.included_charms ?? 0,
+        sort_order: i,
+        is_active: true,
+      }))
+      const { error: insertError } = await supabaseAdmin.from('packages').insert(rows)
+      if (insertError) return fail(`Gagal memasukkan paket: ${insertError.message}`)
+      packages = rows.length
+    }
+
+    let charms = 0
+    if (!(charmRes.data ?? []).some(c => c.image_url || c.catalog_index)) {
+      const rows = Array.from({ length: CHARM_CATALOG_COUNT }, (_, i) => ({
+        name: `Charm ${i + 1}`,
+        emoji: '',
+        catalog_index: i + 1,
+        sort_order: i + 1,
+        is_active: true,
+      }))
+      const { error: insertError } = await supabaseAdmin.from('charms').insert(rows)
+      if (insertError) return fail(`Gagal memasukkan charm: ${insertError.message}`)
+      charms = rows.length
+    }
+
+    return { ok: true, data: { packages, charms } }
+  })
+}
+
+const ORDER_TEXT_FIELDS = [
+  'customer_name', 'customer_whatsapp', 'customer_email', 'customer_instagram', 'pickup_method', 'package_name', 'notes', 'payment_proof_url',
+] as const
+
+// Keep only the order columns the admin may set, trimmed and typed.
+function orderFields(input: Partial<Order>): Partial<OrderInsert> {
+  const out: Partial<OrderInsert> = {}
+  const text = (key: (typeof ORDER_TEXT_FIELDS)[number]) => String(input[key] ?? '').trim()
+  for (const key of ORDER_TEXT_FIELDS) {
+    if (!(key in input)) continue
+    if (key === 'customer_name' || key === 'package_name' || key === 'customer_whatsapp') out[key] = text(key)
+    else out[key] = text(key) || null
+  }
+  if ('customer_whatsapp' in input) out.customer_whatsapp = String(input.customer_whatsapp ?? '').replace(/\D/g, '')
+  if ('customer_instagram' in input && out.customer_instagram) out.customer_instagram = out.customer_instagram.replace(/^@/, '')
+  if ('pickup_method' in input) out.customer_address = out.pickup_method ?? ''
+  if ('total_price' in input) out.total_price = price(input.total_price) ?? 0
+  if ('quantity' in input) out.quantity = Math.max(1, Math.round(Number(input.quantity)) || 1)
+  if ('status' in input) out.status = ORDER_STATUSES.includes(String(input.status)) ? String(input.status) : ORDER_STATUSES[0]
+  if ('charms' in input) out.charms = Array.isArray(input.charms) ? input.charms.map(String).filter(Boolean) : []
+  if ('items' in input) out.items = input.items ?? null
+  if ('created_at' in input && input.created_at && !Number.isNaN(Date.parse(input.created_at))) {
+    out.created_at = new Date(input.created_at).toISOString()
+  }
+  return out
+}
+
+// Columns that are NOT NULL without a default must be present on new rows.
+function newOrder(fields: Partial<OrderInsert>, code: string): OrderInsert {
+  return {
+    status: ORDER_STATUSES[0],
+    total_price: 0,
+    ...fields,
+    order_code: code,
+    customer_name: fields.customer_name || 'Tanpa nama',
+    customer_whatsapp: fields.customer_whatsapp ?? '',
+    customer_address: fields.customer_address ?? '',
+    package_name: fields.package_name ?? '',
+    package_price: fields.package_price ?? 0,
+  }
+}
+
+export async function saveOrder(order: Partial<Order>): Promise<Result> {
+  return guarded(async () => {
+    if (!order.customer_name?.trim()) return fail('Nama pelanggan wajib diisi.')
+    const fields = orderFields(order)
+    const now = new Date().toISOString()
+    const { error } = order.id
+      ? await supabaseAdmin.from('orders').update({ ...fields, updated_at: now }).eq('id', order.id)
+      : await supabaseAdmin.from('orders').insert(newOrder(fields, order.order_code?.trim() || newOrderCode()))
+    if (error?.code === '23505') return fail('Kode pesanan itu sudah dipakai.')
+    return error ? fail(error.message) : { ok: true, data: null }
+  })
+}
+
+export async function deleteOrder(id: string): Promise<Result> {
+  return guarded(async () => {
+    const { error } = await supabaseAdmin.from('orders').delete().eq('id', id)
+    return error ? fail(error.message) : { ok: true, data: null }
+  })
+}
+
+// Rows from an imported CSV. A row whose order code already exists updates that order
+// (only the columns present in the file); every other row is added as a new order.
+export async function importOrders(rows: Partial<Order>[]): Promise<Result<{ added: number; updated: number }>> {
+  return guarded(async () => {
+    if (rows.length > 500) return fail('Maksimal 500 baris per kiriman.')
+    const byCode = new Map<string, Partial<Order>>()
+    for (const row of rows) {
+      const code = row.order_code?.trim() || newOrderCode()
+      byCode.set(code, { ...byCode.get(code), ...row })
+    }
+    const codes = [...byCode.keys()]
+    const { data: existing, error } = await supabaseAdmin.from('orders').select('id, order_code').in('order_code', codes)
+    if (error) return fail(`Gagal memeriksa pesanan: ${error.message}`)
+    const idByCode = new Map((existing ?? []).map(o => [o.order_code, o.id]))
+
+    const now = new Date().toISOString()
+    const inserts: OrderInsert[] = []
+    const updates: { id: string; fields: Partial<OrderInsert> }[] = []
+    for (const [code, row] of byCode) {
+      const fields = orderFields(row)
+      const id = idByCode.get(code)
+      if (id) updates.push({ id, fields: { ...fields, updated_at: now } })
+      else inserts.push(newOrder(fields, code))
+    }
+
+    if (inserts.length) {
+      const { error: insertError } = await supabaseAdmin.from('orders').insert(inserts)
+      if (insertError) return fail(`Gagal menambah pesanan: ${insertError.message}`)
+    }
+    const results = await Promise.all(updates.map(u => supabaseAdmin.from('orders').update(u.fields).eq('id', u.id)))
+    const failed = results.find(r => r.error)
+    if (failed?.error) return fail(`Sebagian pesanan gagal diperbarui: ${failed.error.message}`)
+    return { ok: true, data: { added: inserts.length, updated: updates.length } }
   })
 }

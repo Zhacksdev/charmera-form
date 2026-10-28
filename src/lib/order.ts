@@ -3,6 +3,8 @@ import { CHARM_CATALOG_COUNT } from './charm-catalog.generated'
 
 export type Tab = 'charm' | 'keychain' | 'checkout'
 
+export const ORDER_STATUSES = ['Menunggu verifikasi', 'Menunggu bayar', 'Terbayar', 'Diproses', 'Selesai']
+
 export interface ShopCharm {
   id: string
   name: string
@@ -21,6 +23,9 @@ export interface ShopConfig {
   pickupOptions: string[]
   qrisImage: string
   keychainShapes: KeychainShape[]
+  whatsappNumber: string
+  instagram: string
+  tiktok: string
 }
 
 export type KeychainShape = 'rect' | 'square' | 'heart'
@@ -60,6 +65,9 @@ export const DEFAULT_CONFIG: ShopConfig = {
   pickupOptions: ['Ambil di booth Charmera', 'Dikirim (ongkir dikonfirmasi via WhatsApp)'],
   qrisImage: '/assets/qris.png',
   keychainShapes: KEYCHAIN_SHAPE_IDS,
+  whatsappNumber: '',
+  instagram: '',
+  tiktok: '',
 }
 
 // Placeholder sets shown until packages are filled in Supabase. Prices are examples only.
@@ -105,7 +113,16 @@ export function toShopConfig(settings: Partial<Settings> | null): ShopConfig {
     pickupOptions: settings.pickup_options?.length ? settings.pickup_options : DEFAULT_CONFIG.pickupOptions,
     qrisImage: settings.qris_image_url || DEFAULT_CONFIG.qrisImage,
     keychainShapes: shapes.length ? shapes : DEFAULT_CONFIG.keychainShapes,
+    whatsappNumber: settings.whatsapp_number || '',
+    instagram: settings.instagram_username || '',
+    tiktok: settings.tiktok_username || '',
   }
+}
+
+// wa.me needs the international form, so a local 08xx number becomes 628xx.
+export function whatsappLink(number: string, message: string) {
+  const digits = number.replace(/\D/g, '').replace(/^0/, '62')
+  return digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : null
 }
 
 export function formatRupiah(value: number) {
