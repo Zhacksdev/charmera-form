@@ -8,7 +8,7 @@ import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generat
 import {
   DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
   formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainUnitPrice, newOrderCode, packageContents, packageShortfall,
-  resizeSlots, summarizeBracelet, toShopCharm, toShopConfig,
+  resizeBoard, summarizeBracelet, toShopCharm, toShopConfig,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
 import { renderKeychainSide } from '@/lib/keychain'
@@ -50,6 +50,7 @@ export function OrderForm() {
 
   const [packageId, setPackageId] = useState('')
   const [slots, setSlots] = useState<(CharmPick | null)[]>(() => Array(DEFAULT_CONFIG.slotCount).fill(null))
+  const [tray, setTray] = useState<CharmPick[]>([])
   const [note, setNote] = useState('')
   const [keychain, setKeychain] = useState<KeychainDraft>(EMPTY_KEYCHAIN)
 
@@ -109,8 +110,9 @@ export function OrderForm() {
 
   const charmsById = useMemo(() => new Map(charms.map(c => [c.id, c])), [charms])
   const selectedPackage = packages.find(p => p.id === packageId)
-  const bracelet = summarizeBracelet(selectedPackage, slots, charmsById, config)
-  const hasCharms = slots.some(Boolean)
+  const allPicks = [...slots, ...tray]
+  const bracelet = summarizeBracelet(selectedPackage, allPicks, charmsById, config)
+  const hasCharms = allPicks.some(Boolean)
   const contents = packageContents(selectedPackage)
   const includedKeychains = selectedPackage ? contents.keychains : 0
   const keychainActive = keychainHasPhoto(keychain)
@@ -118,7 +120,8 @@ export function OrderForm() {
   const keychainCost = keychainCharge(keychain, config, includedKeychains)
   const keychainTotal = keychainCost.total
   const total = bracelet.total + keychainTotal
-  const shortfall = packageShortfall(selectedPackage, slots, keychain)
+  const shortfall = packageShortfall(selectedPackage, allPicks, keychain)
+  if (tray.length) shortfall.unshift(`Pasang ${tray.length} charm yang sudah kamu pilih ke gelangnya.`)
 
   const lines: ReceiptLine[] = []
   if (selectedPackage) {
@@ -169,15 +172,16 @@ export function OrderForm() {
     const nextId = packageId === id ? '' : id
     const next = packages.find(p => p.id === nextId)
     const nextContents = packageContents(next)
-    const { slots: resized, dropped } = resizeSlots(slots, nextContents.bracelets * config.slotCount)
-    for (const pick of dropped) {
+    const board = resizeBoard(slots, tray, nextContents.bracelets * config.slotCount, nextContents.bracelets === 1)
+    for (const pick of board.dropped) {
       if (pick.kind !== 'custom') continue
       URL.revokeObjectURL(pick.preview)
       URL.revokeObjectURL(pick.photo.src)
     }
-    if (dropped.length) notify(`${dropped.length} charm dilepas karena tidak muat di set ini.`)
+    if (board.dropped.length) notify(`${board.dropped.length} charm dilepas karena tidak muat di set ini.`)
     setPackageId(nextId)
-    setSlots(resized)
+    setSlots(board.slots)
+    setTray(board.tray)
     if (next && keychain.qty < nextContents.keychains) setKeychain(k => ({ ...k, qty: nextContents.keychains }))
   }
 
@@ -309,7 +313,7 @@ export function OrderForm() {
   }
 
   function startOver() {
-    for (const pick of slots) {
+    for (const pick of allPicks) {
       if (pick?.kind !== 'custom') continue
       URL.revokeObjectURL(pick.preview)
       URL.revokeObjectURL(pick.photo.src)
@@ -317,6 +321,7 @@ export function OrderForm() {
     for (const photo of Object.values(keychain.photos)) if (photo) URL.revokeObjectURL(photo.src)
     setPackageId('')
     setSlots(Array(config.slotCount).fill(null))
+    setTray([])
     setNote('')
     setKeychain({ ...EMPTY_KEYCHAIN, shape: config.keychainShapes[0] })
     setCustomer(EMPTY_CUSTOMER)
@@ -377,7 +382,11 @@ export function OrderForm() {
                 packageId={packageId}
                 onSelectPackage={selectPackage}
                 slots={slots}
-                onSlotsChange={setSlots}
+                tray={tray}
+                onBoardChange={(nextSlots, nextTray) => {
+                  setSlots(nextSlots)
+                  setTray(nextTray)
+                }}
                 note={note}
                 onNoteChange={setNote}
                 notify={notify}

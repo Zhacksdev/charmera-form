@@ -14,7 +14,7 @@ import { SlotBoard } from './SlotBoard'
 const PAGE_SIZE = 48
 
 export function BraceletBuilder({
-  packages, charms, charmsById, config, packageId, onSelectPackage, slots, onSlotsChange, note, onNoteChange, notify, aside,
+  packages, charms, charmsById, config, packageId, onSelectPackage, slots, tray, onBoardChange, note, onNoteChange, notify, aside,
   keychainReady, packageKeychain,
 }: {
   aside?: React.ReactNode
@@ -27,7 +27,9 @@ export function BraceletBuilder({
   packageId: string
   onSelectPackage: (id: string) => void
   slots: (CharmPick | null)[]
-  onSlotsChange: (slots: (CharmPick | null)[]) => void
+  // Picked charms not yet placed on a bracelet; only used when the set has several bracelets.
+  tray: CharmPick[]
+  onBoardChange: (slots: (CharmPick | null)[], tray: CharmPick[]) => void
   note: string
   onNoteChange: (note: string) => void
   notify: (message: string) => void
@@ -50,7 +52,9 @@ export function BraceletBuilder({
   const pageCount = Math.max(1, Math.ceil(charms.length / PAGE_SIZE))
   const visibleCharms = charms.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const setPages = Math.max(1, Math.ceil(packages.length / 3))
-  const picks = slots.filter((s): s is CharmPick => s !== null)
+  // With several bracelets, picks wait in the tray and the customer places them on each bracelet.
+  const useTray = contents.bracelets > 1
+  const picks = [...slots.filter((s): s is CharmPick => s !== null), ...tray]
   const customPicks = picks.filter(p => p.kind === 'custom')
   const pickCounts = new Map<string, number>()
   for (const p of picks) if (p.kind === 'catalog') pickCounts.set(p.charmId, (pickCounts.get(p.charmId) ?? 0) + 1)
@@ -63,29 +67,47 @@ export function BraceletBuilder({
       ].filter((item): item is { label: string; done: boolean; count: string } => Boolean(item))
     : []
 
-  function place(pick: CharmPick) {
-    const index = slots.indexOf(null)
-    if (index === -1) {
-      notify(`Semua slot gelangmu (${slots.length}) sudah terisi. Lepas satu dulu, ya.`)
-      return false
-    }
-    const next = [...slots]
-    next[index] = pick
-    onSlotsChange(next)
+  function isFull() {
+    if (picks.length < slots.length) return false
+    notify(`Semua slot gelangmu (${slots.length}) sudah terisi. Lepas satu dulu, ya.`)
     return true
   }
 
+  function place(pick: CharmPick) {
+    if (isFull()) return false
+    if (useTray) {
+      onBoardChange(slots, [...tray, pick])
+      if (tray.length === 0) notify('Charm masuk ke daftar. Pasang ke gelangnya di bagian Kustomisasi, ya.')
+      return true
+    }
+    const next = [...slots]
+    next[next.indexOf(null)] = pick
+    onBoardChange(next, tray)
+    return true
+  }
+
+  function placeAll() {
+    const next = [...slots]
+    const rest = tray.filter(pick => {
+      const free = next.indexOf(null)
+      if (free === -1) return true
+      next[free] = pick
+      return false
+    })
+    onBoardChange(next, rest)
+  }
+
   function remove(uid: string) {
-    const target = slots.find(s => s?.uid === uid)
+    const target = picks.find(p => p.uid === uid)
     if (target?.kind === 'custom') {
       URL.revokeObjectURL(target.preview)
       URL.revokeObjectURL(target.photo.src)
     }
-    onSlotsChange(slots.map(s => (s?.uid === uid ? null : s)))
+    onBoardChange(slots.map(s => (s?.uid === uid ? null : s)), tray.filter(p => p.uid !== uid))
   }
 
   function committedSrc(uid: string | null) {
-    const pick = uid ? slots.find(s => s?.uid === uid) : null
+    const pick = uid ? picks.find(p => p.uid === uid) : null
     return pick?.kind === 'custom' ? pick.photo.src : null
   }
 
@@ -95,11 +117,7 @@ export function BraceletBuilder({
   }
 
   function uploadNew() {
-    if (!slots.includes(null)) {
-      notify(`Semua slot gelangmu (${slots.length}) sudah terisi. Lepas satu dulu, ya.`)
-      return
-    }
-    fileRef.current?.click()
+    if (!isFull()) fileRef.current?.click()
   }
 
   async function handleFile(file: File | undefined) {
@@ -137,12 +155,13 @@ export function BraceletBuilder({
     const preview = URL.createObjectURL(crop)
     const { uid, photo } = editing
     if (uid) {
-      onSlotsChange(slots.map(s => {
+      const update = <T extends CharmPick | null>(s: T): T => {
         if (s?.uid !== uid || s.kind !== 'custom') return s
         URL.revokeObjectURL(s.preview)
         if (s.photo.src !== photo.src) URL.revokeObjectURL(s.photo.src)
         return { ...s, photo, crop, preview }
-      }))
+      }
+      onBoardChange(slots.map(update), tray.map(update))
     } else if (!place({ uid: newUid(), kind: 'custom', photo, crop, preview })) {
       URL.revokeObjectURL(preview)
       URL.revokeObjectURL(photo.src)
@@ -170,7 +189,7 @@ export function BraceletBuilder({
               return (
                 <div key={pkg.id} className={`set-card ${active ? 'is-active' : ''} ${isFlipped ? 'is-flipped' : ''}`}>
                   <div className="set-card-inner">
-                    {/* Front: name, price and mascot. Tapping either face picks the set. */}
+                    {/* Front: name, contents, price and mascot. Tapping either face picks the set. */}
                     <button
                       type="button"
                       className="set-face"
@@ -180,36 +199,39 @@ export function BraceletBuilder({
                       onClick={() => onSelectPackage(pkg.id)}
                     >
                       <h2 className="bubble-title is-small">{pkg.name}</h2>
-                      <span className="set-price">{formatRupiah(pkg.price)}</span>
-                      <Image className="set-mascot" src="/assets/maskot-set.webp" alt="" width={158} height={93} />
-                    </button>
-                    {/* Back: what the set contains. */}
-                    <button
-                      type="button"
-                      className="set-face is-back"
-                      aria-pressed={active}
-                      aria-hidden={!isFlipped}
-                      tabIndex={isFlipped ? 0 : -1}
-                      onClick={() => onSelectPackage(pkg.id)}
-                    >
-                      <span className="set-back-title">Isi {pkg.name}</span>
                       <span className="set-items">
                         {packageItems(pkg).map(item => (
                           <span key={item}><span className="chip">{item}</span></span>
                         ))}
                       </span>
-                      {pkg.description && <span className="set-description">{pkg.description}</span>}
                       <span className="set-price">{formatRupiah(pkg.price)}</span>
+                      <Image className="set-mascot" src="/assets/maskot-set.webp" alt="" width={158} height={93} />
                     </button>
+                    {/* Back: the admin's description paragraph. */}
+                    {pkg.description && (
+                      <button
+                        type="button"
+                        className="set-face is-back"
+                        aria-pressed={active}
+                        aria-hidden={!isFlipped}
+                        tabIndex={isFlipped ? 0 : -1}
+                        onClick={() => onSelectPackage(pkg.id)}
+                      >
+                        <span className="set-back-title">{pkg.name}</span>
+                        <span className="set-description">{pkg.description}</span>
+                      </button>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    className="set-flip"
-                    onClick={() => setFlipped(isFlipped ? null : pkg.id)}
-                    aria-label={isFlipped ? `Tutup isi ${pkg.name}` : `Lihat isi ${pkg.name}`}
-                  >
-                    {isFlipped ? '↺ Tutup' : 'ⓘ Isi paket'}
-                  </button>
+                  {pkg.description && (
+                    <button
+                      type="button"
+                      className="set-flip"
+                      onClick={() => setFlipped(isFlipped ? null : pkg.id)}
+                      aria-label={isFlipped ? `Tutup deskripsi ${pkg.name}` : `Lihat deskripsi ${pkg.name}`}
+                    >
+                      {isFlipped ? '↺ Kembali' : 'ⓘ Detail'}
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -238,7 +260,9 @@ export function BraceletBuilder({
                 ))}
               </ul>
               {contents.bracelets > 1 && (
-                <p className="muted">Paketmu berisi {contents.bracelets} gelang. Charm diisi berurutan: Gelang 1 dulu, lalu Gelang 2, dan seterusnya.</p>
+                <p className="muted">
+                  Paketmu berisi {contents.bracelets} gelang. Pilih charm-mu dulu, lalu pasang ke masing-masing gelang di bagian Kustomisasi.
+                </p>
               )}
             </div>
           )}
@@ -367,10 +391,21 @@ export function BraceletBuilder({
           <div className="section-head is-center">
             <h2 id="arrange-title" className="bubble-title is-section">Kustomisasi Charm Pilihanmu</h2>
           </div>
-          <SlotBoard slots={slots} charmsById={charmsById} onChange={onSlotsChange} groupSize={config.slotCount} />
+          <SlotBoard
+            slots={slots}
+            tray={useTray ? tray : undefined}
+            charmsById={charmsById}
+            onChange={onBoardChange}
+            groupSize={config.slotCount}
+          />
+          {useTray && tray.length > 0 && slots.includes(null) && (
+            <p className="arrange-auto">
+              <button type="button" className="pill" onClick={placeAll}>Pasang otomatis berurutan</button>
+            </p>
+          )}
           <p className="section-note is-center arrange-note">Kamu bisa drag &amp; drop posisi charm</p>
           <p className="muted hint is-center">
-            Atau ketuk dua slot untuk menukar posisinya. {picks.length}/{slots.length} slot terisi.
+            Atau ketuk dua slot untuk menukar posisinya. {slots.filter(Boolean).length}/{slots.length} slot terisi.
           </p>
         </section>
 

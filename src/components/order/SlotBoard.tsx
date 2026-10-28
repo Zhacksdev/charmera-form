@@ -15,12 +15,15 @@ interface DragState {
 const DRAG_THRESHOLD = 6
 
 // Drag with a pointer (works for touch and mouse), or tap one slot then another to swap.
-// With several bracelets the board shows one row per bracelet of `groupSize` slots. Indexes stay global,
-// so a charm can also be moved to another bracelet.
-export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.length }: {
+// With several bracelets the board shows one row per bracelet of `groupSize` slots, and `tray` holds charms
+// that are picked but not placed yet. Bracelet slots and tray cells share one index space
+// (slots first, then the tray, then one empty cell to drop a charm back), so the same swap moves
+// charms between bracelets and in or out of the tray.
+export function SlotBoard({ slots, tray, charmsById, onChange, groupSize = slots.length }: {
   slots: (CharmPick | null)[]
+  tray?: CharmPick[]
   charmsById: Map<string, ShopCharm>
-  onChange: (slots: (CharmPick | null)[]) => void
+  onChange: (slots: (CharmPick | null)[], tray: CharmPick[]) => void
   groupSize?: number
 }) {
   const [selected, setSelected] = useState<number | null>(null)
@@ -28,10 +31,12 @@ export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.lengt
   const start = useRef<{ from: number; x: number; y: number } | null>(null)
   const justDragged = useRef(false)
 
+  const cells: (CharmPick | null)[] = tray ? [...slots, ...tray, null] : slots
+
   function swap(a: number, b: number) {
-    const next = [...slots]
+    const next = [...cells]
     ;[next[a], next[b]] = [next[b], next[a]]
-    onChange(next)
+    onChange(next.slice(0, slots.length), next.slice(slots.length).filter((c): c is CharmPick => c !== null))
   }
 
   function slotAt(x: number, y: number) {
@@ -40,7 +45,7 @@ export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.lengt
   }
 
   function handlePointerDown(e: ReactPointerEvent<HTMLButtonElement>, index: number) {
-    if (!slots[index] || e.button !== 0) return
+    if (!cells[index] || e.button !== 0) return
     start.current = { from: index, x: e.clientX, y: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -67,7 +72,7 @@ export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.lengt
       return
     }
     if (selected === null) {
-      if (slots[index]) setSelected(index)
+      if (cells[index]) setSelected(index)
     } else if (selected === index) {
       setSelected(null)
     } else {
@@ -76,15 +81,53 @@ export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.lengt
     }
   }
 
-  const dragged = drag ? slots[drag.from] : null
+  function cell(i: number, label: string) {
+    const pick = cells[i]
+    return (
+      <button
+        key={i}
+        type="button"
+        data-slot={i}
+        className={[
+          'slot',
+          selected === i && 'is-selected',
+          drag?.over === i && drag.from !== i && 'is-target',
+          drag?.from === i && 'is-dragging',
+        ].filter(Boolean).join(' ')}
+        aria-label={`${label}: ${pickLabel(pick, charmsById)}`}
+        aria-pressed={selected === i}
+        onPointerDown={e => handlePointerDown(e, i)}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={() => { start.current = null; setDrag(null) }}
+        onClick={() => handleClick(i)}
+      >
+        {pick ? <PickArt pick={pick} charmsById={charmsById} /> : <PhotoLink alt="" />}
+      </button>
+    )
+  }
+
+  const dragged = drag ? cells[drag.from] : null
   const size = Math.max(1, groupSize)
   const groupStarts = Array.from({ length: Math.ceil(slots.length / size) }, (_, g) => g * size)
   const grouped = groupStarts.length > 1
-  // The bracelet being filled now: the first one with a free slot.
-  const current = groupStarts.findIndex(first => slots.slice(first, first + size).includes(null))
+  // Without a tray, charms fill the bracelets in order; mark the one being filled.
+  const current = tray ? -1 : groupStarts.findIndex(first => slots.slice(first, first + size).includes(null))
 
   return (
     <>
+      {tray && (
+        <div className="slot-tray">
+          <p className="slot-group-title">
+            Charm belum dipasang
+            <span>{tray.length ? `${tray.length} charm` : 'semua sudah terpasang'}</span>
+          </p>
+          <div className="slot-tray-list">
+            {cells.slice(slots.length).map((_, offset) => cell(slots.length + offset, offset < tray.length ? 'Charm belum dipasang' : 'Kembalikan ke daftar'))}
+          </div>
+          {tray.length > 0 && <p className="muted">Ketuk charm di sini, lalu ketuk slot gelang tujuannya (atau geser langsung).</p>}
+        </div>
+      )}
       {groupStarts.map((first, g) => {
         const group = slots.slice(first, first + size)
         return (
@@ -96,31 +139,7 @@ export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.lengt
               </p>
             )}
             <div className="slot-grid" style={{ '--slot-cols': Math.min(size, 9) } as React.CSSProperties}>
-              {group.map((pick, offset) => {
-                const i = first + offset
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    data-slot={i}
-                    className={[
-                      'slot',
-                      selected === i && 'is-selected',
-                      drag?.over === i && drag.from !== i && 'is-target',
-                      drag?.from === i && 'is-dragging',
-                    ].filter(Boolean).join(' ')}
-                    aria-label={`${grouped ? `Gelang ${g + 1}, posisi` : 'Posisi'} ${offset + 1}: ${pickLabel(pick, charmsById)}`}
-                    aria-pressed={selected === i}
-                    onPointerDown={e => handlePointerDown(e, i)}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={() => { start.current = null; setDrag(null) }}
-                    onClick={() => handleClick(i)}
-                  >
-                    {pick ? <PickArt pick={pick} charmsById={charmsById} /> : <PhotoLink alt="" />}
-                  </button>
-                )
-              })}
+              {group.map((_, offset) => cell(first + offset, `${grouped ? `Gelang ${g + 1}, posisi` : 'Posisi'} ${offset + 1}`))}
             </div>
           </div>
         )

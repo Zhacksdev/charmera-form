@@ -161,32 +161,15 @@ export function packageContents(pkg: Package | undefined): PackageContents {
   }
 }
 
-// The lines shown on a set card. Admin-written items win; otherwise describe the configured contents.
+// The fixed lines on a set card, built from the checklist the admin fills in (never free text).
 export function packageItems(pkg: Package) {
-  if (pkg.items?.some(i => i.trim())) return pkg.items.filter(i => i.trim())
   const c = packageContents(pkg)
   return [
-    `${c.bracelets}x Plain Bracelet`,
+    (pkg.bracelet_count ?? 1) > 0 && `${c.bracelets}x Plain Bracelet`,
     c.charms > 0 && `${c.charms}x Charm`,
     c.customCharms > 0 && `${c.customCharms}x Charm Custom`,
-    c.keychains > 0 && `${c.keychains}x Keychain Custom`,
+    c.keychains > 0 && `${c.keychains}x Custom Keychain`,
   ].filter((i): i is string => Boolean(i))
-}
-
-// Read counts from card text like "3x Plain", "9x Custom", "1x Keychain custom", "1x Charm".
-export function contentsFromItems(items: string[]) {
-  const out = { bracelet_count: 1, included_charms: 0, included_custom_charms: 0, included_keychains: 0 }
-  for (const item of items) {
-    const match = item.match(/(\d+)\s*(?:x|pcs)?\s*(.*)/i)
-    if (!match) continue
-    const n = Number(match[1])
-    const what = match[2].toLowerCase()
-    if (/keychain|key chain|ganci/.test(what)) out.included_keychains += n
-    else if (/plain|bracelet|gelang/.test(what)) out.bracelet_count = Math.max(1, n)
-    else if (/custom/.test(what)) out.included_custom_charms += n
-    else if (/charm/.test(what)) out.included_charms += n
-  }
-  return out
 }
 
 export interface BraceletSummary {
@@ -254,19 +237,18 @@ export function packageShortfall(pkg: Package | undefined, slots: (CharmPick | n
   return missing
 }
 
-// Change how many slots the board has, moving picks that no longer fit into free slots.
-// Returns the picks that could not be kept so the caller can release their previews.
-export function resizeSlots(slots: (CharmPick | null)[], length: number) {
+// Resize the bracelet board to `length` slots. Picks that lose their slot join the tray (picked but not yet
+// placed on a bracelet); with `autoPlace` the tray is emptied into free slots in order, which is how a single
+// bracelet works. Picks beyond the board's capacity are returned so the caller can release their previews.
+export function resizeBoard(slots: (CharmPick | null)[], tray: CharmPick[], length: number, autoPlace: boolean) {
   const next = slots.slice(0, length)
   while (next.length < length) next.push(null)
-  const dropped: CharmPick[] = []
-  for (const pick of slots.slice(length)) {
-    if (!pick) continue
-    const free = next.indexOf(null)
-    if (free === -1) dropped.push(pick)
-    else next[free] = pick
-  }
-  return { slots: next, dropped }
+  const pending = [...slots.slice(length).filter((s): s is CharmPick => s !== null), ...tray]
+  const free = next.filter(s => s === null).length
+  const dropped = pending.splice(free)
+  if (!autoPlace) return { slots: next, tray: pending, dropped }
+  for (const pick of pending) next[next.indexOf(null)] = pick
+  return { slots: next, tray: [], dropped }
 }
 
 export function keychainUnitPrice(draft: KeychainDraft, config: ShopConfig) {

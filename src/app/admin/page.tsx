@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
-import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, contentsFromItems, packageItems } from '@/lib/order'
+import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems } from '@/lib/order'
 import type { KeychainShape } from '@/lib/order'
 import {
   createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
@@ -16,12 +16,71 @@ import { downloadFile } from '@/lib/csv'
 
 const IMPORT_CHUNK = 200
 
-const PACKAGE_CONTENT_FIELDS = [
-  { key: 'bracelet_count', label: 'Plain bracelet (gelang)', short: 'gelang', min: 1 },
-  { key: 'included_charms', label: 'Charm non-custom', short: 'charm', min: 0 },
-  { key: 'included_custom_charms', label: 'Charm custom', short: 'charm custom', min: 0 },
-  { key: 'included_keychains', label: 'Keychain custom', short: 'keychain', min: 0 },
-] as const
+type PackageContentsPatch = Pick<Package, 'bracelet_count' | 'included_charms' | 'included_custom_charms' | 'included_keychains'>
+
+// The fixed checklist of what a set contains. Charm is one row with a type, stored as either
+// included_charms (catalog) or included_custom_charms (customer photo).
+function PackageContentsEditor({ pkg, onChange }: { pkg: Partial<Package>; onChange: (patch: Partial<PackageContentsPatch>) => void }) {
+  const bracelets = pkg.bracelet_count ?? 1
+  const custom = (pkg.included_custom_charms ?? 0) > 0
+  const charms = (pkg.included_charms ?? 0) + (pkg.included_custom_charms ?? 0)
+  const keychains = pkg.included_keychains ?? 0
+  const setCharms = (count: number, isCustom: boolean) =>
+    onChange({ included_charms: isCustom ? 0 : count, included_custom_charms: isCustom ? count : 0 })
+
+  const rows = [
+    { label: 'Plain Bracelet', count: bracelets, set: (n: number) => onChange({ bracelet_count: n }) },
+    { label: 'Charm', count: charms, set: (n: number) => setCharms(n, custom) },
+    { label: 'Custom Keychain', count: keychains, set: (n: number) => onChange({ included_keychains: n }) },
+  ]
+
+  return (
+    <fieldset className="rounded-xl border border-line p-3">
+      <legend className="px-1 text-sm font-semibold">Isi paket</legend>
+      <div className="space-y-2">
+        {rows.map(row => (
+          <div key={row.label} className="flex flex-wrap items-center gap-3">
+            <label className="flex min-w-36 flex-1 items-center gap-2 font-semibold">
+              <input
+                type="checkbox"
+                checked={row.count > 0}
+                onChange={e => row.set(e.target.checked ? 1 : 0)}
+                className="accent-cherry"
+              />
+              {row.label}
+            </label>
+            <input
+              type="number"
+              min={1}
+              aria-label={`Jumlah ${row.label}`}
+              disabled={row.count === 0}
+              value={row.count || ''}
+              onChange={e => row.set(Math.max(1, parseInt(e.target.value) || 1))}
+              className={`${inputClass} !w-20 !py-2 text-center disabled:opacity-40`}
+            />
+            {row.label === 'Charm' && (
+              <select
+                aria-label="Jenis charm"
+                disabled={charms === 0}
+                value={custom ? 'custom' : 'catalog'}
+                onChange={e => setCharms(charms, e.target.value === 'custom')}
+                className={`${inputClass} !w-auto !py-2 disabled:opacity-40`}
+              >
+                <option value="catalog">Non-custom</option>
+                <option value="custom">Custom (foto)</option>
+              </select>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-char/60">
+        Jumlah Plain Bracelet menentukan jumlah gelang di kotak Kustomisasi. Charm custom mengunci katalog (charm non-custom jadi add-on).
+        Paket dengan Custom Keychain langsung menampilkan editor keychain dan wajib diisi sebelum bayar.
+      </p>
+    </fieldset>
+  )
+}
+
 const MAX_QR_BYTES = 5 * 1024 * 1024
 
 type Tab = 'orders' | 'prices' | 'packages' | 'charms' | 'settings'
@@ -900,9 +959,7 @@ export default function AdminPage() {
                       <h3 className="font-semibold text-lg">{pkg.name}</h3>
                       <p className="text-cherry font-bold">Rp {pkg.price.toLocaleString('id')}</p>
                       <p className="text-sm text-char/70 mt-1">{packageItems(pkg).join(' · ')}</p>
-                      <p className="text-xs text-char/60 mt-1">
-                        Isi: {PACKAGE_CONTENT_FIELDS.map(f => `${pkg[f.key] ?? f.min} ${f.short}`).join(' · ')}
-                      </p>
+                      {pkg.description && <p className="text-xs text-char/60 mt-1 line-clamp-2">{pkg.description}</p>}
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => setEditingPkg(pkg)} className="px-3 py-1 text-sm bg-sky/30 rounded-full hover:bg-sky/50">
@@ -942,55 +999,19 @@ export default function AdminPage() {
                         onChange={value => setEditingPkg(prev => prev ? { ...prev, price: toNumber(value) ?? 0 } : null)}
                       />
                     </label>
-                    <textarea
-                      placeholder="Deskripsi (opsional)"
-                      value={editingPkg.description || ''}
-                      onChange={e => setEditingPkg(prev => prev ? { ...prev, description: e.target.value } : null)}
-                      className={`${inputClass} resize-none`}
-                      rows={2}
+                    <PackageContentsEditor
+                      pkg={editingPkg}
+                      onChange={patch => setEditingPkg(prev => (prev ? { ...prev, ...patch } : null))}
                     />
-                    <fieldset className="rounded-xl border border-line p-3">
-                      <legend className="px-1 text-sm font-semibold">Isi paket (dipakai form untuk harga &amp; tampilan)</legend>
-                      <div className="grid grid-cols-2 gap-3">
-                        {PACKAGE_CONTENT_FIELDS.map(f => (
-                          <label key={f.key} className="block text-xs">
-                            {f.label}
-                            <input
-                              type="number"
-                              min={f.min}
-                              value={editingPkg[f.key] ?? f.min}
-                              onChange={e => setEditingPkg(prev => prev ? { ...prev, [f.key]: Math.max(f.min, parseInt(e.target.value) || 0) } : null)}
-                              className={`mt-1 ${inputClass}`}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-xs text-char/60">
-                        Contoh Full Set: 3 gelang, 9 charm custom. Paket dengan keychain akan langsung menampilkan editor keychain,
-                        dan pelanggan wajib mengisinya sebelum bayar.
-                      </p>
-                    </fieldset>
                     <label className="block text-sm">
-                      Teks isi di kartu paket (opsional, satu baris satu item)
+                      Deskripsi detail (tampil saat kartu paket di-flip)
                       <textarea
-                        value={(editingPkg.items ?? []).join('\n')}
-                        placeholder={packageItems({ ...editingPkg, items: [] } as Package).join('\n')}
-                        onChange={e => setEditingPkg(prev => prev ? { ...prev, items: e.target.value.split('\n') } : null)}
+                        placeholder="Misal: Cocok untuk kado bertiga. Semua charm dari fotomu sendiri…"
+                        value={editingPkg.description || ''}
+                        onChange={e => setEditingPkg(prev => prev ? { ...prev, description: e.target.value } : null)}
                         className={`mt-1 ${inputClass} resize-none`}
-                        rows={3}
+                        rows={4}
                       />
-                      <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-char/60">
-                        Kosongkan untuk dibuat otomatis dari isi paket.
-                        {editingPkg.items?.some(i => i.trim()) && (
-                          <button
-                            type="button"
-                            className="font-semibold text-cherry underline"
-                            onClick={() => setEditingPkg(prev => prev ? { ...prev, ...contentsFromItems(prev.items ?? []) } : null)}
-                          >
-                            Isi angka dari teks ini
-                          </button>
-                        )}
-                      </span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
