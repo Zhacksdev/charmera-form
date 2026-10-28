@@ -115,3 +115,6 @@ drop policy if exists "public upload order files" on storage.objects;
 create policy "public upload order files" on storage.objects
   for insert to anon, authenticated
   with check (bucket_id = 'order-uploads');
+
+-- Make the API pick up new columns right away (otherwise: "column ... not found in the schema cache").
+notify pgrst, 'reload schema';

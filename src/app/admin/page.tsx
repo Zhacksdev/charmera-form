@@ -7,7 +7,7 @@ import type { Charm, Order, Package, Settings } from '@/lib/supabase'
 import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems } from '@/lib/order'
 import type { KeychainShape } from '@/lib/order'
 import {
-  createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
+  createCharmUpload, createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
   saveCharm, saveGeneralSettings, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
 } from './actions'
 import type { Result } from './actions'
@@ -263,6 +263,8 @@ export default function AdminPage() {
   const [editingOrder, setEditingOrder] = useState<Partial<Order> | null>(null)
   const [qrFile, setQrFile] = useState<File | null>(null)
   const [qrPreview, setQrPreview] = useState<string | null>(null)
+  const [charmFile, setCharmFile] = useState<File | null>(null)
+  const [charmPreview, setCharmPreview] = useState<string | null>(null)
 
   function show(result: Result<unknown>, success?: string) {
     if (!result.ok) {
@@ -414,10 +416,42 @@ export default function AdminPage() {
     if (await run(() => deletePackage(id), 'Paket dihapus.')) await refresh()
   }
 
+  function pickCharmImage(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setNotice({ type: 'error', text: 'File charm harus berupa gambar.' })
+    if (file.size > MAX_QR_BYTES) return setNotice({ type: 'error', text: 'Ukuran gambar charm maksimal 5 MB.' })
+    if (charmPreview) URL.revokeObjectURL(charmPreview)
+    setCharmFile(file)
+    setCharmPreview(URL.createObjectURL(file))
+  }
+
+  function closeCharmEditor() {
+    if (charmPreview) URL.revokeObjectURL(charmPreview)
+    setCharmFile(null)
+    setCharmPreview(null)
+    setEditingCharm(null)
+  }
+
   async function handleSaveCharm() {
     if (!editingCharm) return
-    if (await run(() => saveCharm(editingCharm), 'Charm disimpan.')) {
-      setEditingCharm(null)
+    let charm = editingCharm
+    if (charmFile) {
+      setBusy(true)
+      try {
+        const ticket = await createCharmUpload(charmFile.name.split('.').pop() ?? 'png')
+        if (!show(ticket) || !ticket.ok) return
+        const { error } = await supabase.storage
+          .from(UPLOAD_BUCKET)
+          .uploadToSignedUrl(ticket.data.path, ticket.data.token, charmFile, { contentType: charmFile.type })
+        if (error) return setNotice({ type: 'error', text: `Upload gagal: ${error.message}` })
+        // The uploaded picture replaces any catalog number so it is the one shown.
+        charm = { ...charm, image_url: ticket.data.url, catalog_index: null }
+      } finally {
+        setBusy(false)
+      }
+    }
+    if (await run(() => saveCharm(charm), 'Charm disimpan.')) {
+      closeCharmEditor()
       await refresh()
     }
   }
@@ -425,7 +459,7 @@ export default function AdminPage() {
   async function handleDeleteCharm(id: string) {
     if (!confirm('Hapus charm ini?')) return
     if (await run(() => deleteCharm(id), 'Charm dihapus.')) {
-      setEditingCharm(null)
+      closeCharmEditor()
       await refresh()
     }
   }
@@ -1099,6 +1133,34 @@ export default function AdminPage() {
                     {editingCharm.id ? 'Edit Charm' : 'Tambah Charm'}
                   </h3>
                   <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-line bg-rose flex items-center justify-center text-3xl">
+                        {charmPreview || editingCharm.image_url || editingCharm.catalog_index ? (
+                          <img
+                            src={charmPreview || editingCharm.image_url || `/charms/catalog-${String(editingCharm.catalog_index).padStart(2, '0')}.webp`}
+                            alt="Gambar charm"
+                            className="h-full w-full object-contain"
+                          />
+                        ) : editingCharm.emoji || '?'}
+                      </div>
+                      <div className="min-w-0 text-sm">
+                        <label className={`${secondaryButton} cursor-pointer inline-block`}>
+                          {charmPreview ? 'Ganti gambar' : 'Upload gambar'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={e => {
+                              pickCharmImage(e.target.files?.[0])
+                              e.target.value = ''
+                            }}
+                          />
+                        </label>
+                        <p className="mt-1 text-xs text-char/60">
+                          {charmFile ? `${charmFile.name} (diupload saat Simpan)` : 'Satu gambar per charm, maks 5 MB. PNG transparan paling bagus.'}
+                        </p>
+                      </div>
+                    </div>
                     <input
                       type="text"
                       placeholder="Nama (opsional)"
@@ -1156,7 +1218,7 @@ export default function AdminPage() {
                   </div>
                   <div className="flex gap-2 mt-6">
                     <button
-                      onClick={() => setEditingCharm(null)}
+                      onClick={closeCharmEditor}
                       className="flex-1 py-3 bg-char/10 rounded-full font-semibold hover:bg-char/20 transition-all"
                     >
                       Batal

@@ -46,6 +46,12 @@ const COOKIE = 'charmera_admin'
 const SESSION_DAYS = 7
 
 function fail(error: string): Result<never> {
+  // A column added in a newer schema.sql that hasn't been run on this database yet.
+  const missing = error.match(/'(\w+)' column of '(\w+)'|column (?:\w+\.)?"?(\w+)"? does not exist/)
+  if (missing) {
+    const column = missing[1] ?? missing[3]
+    return { ok: false, error: `Kolom "${column}" belum ada di database. Jalankan ulang supabase/schema.sql di SQL Editor Supabase, lalu coba lagi.` }
+  }
   return { ok: false, error }
 }
 
@@ -197,6 +203,18 @@ export async function createQrisUpload(extension: string): Promise<Result<{ path
     const path = `settings/qris-${Date.now()}.${ext}`
     const { data, error } = await supabaseAdmin.storage.from(UPLOAD_BUCKET).createSignedUploadUrl(path)
     return error ? fail(error.message) : { ok: true, data: { path, token: data.token } }
+  })
+}
+
+// Same signed-URL route for a charm picture; the public URL is stored as the charm's image_url on save.
+export async function createCharmUpload(extension: string): Promise<Result<{ path: string; token: string; url: string }>> {
+  return guarded(async () => {
+    const ext = extension.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'png'
+    const path = `charms/charm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const { data, error } = await supabaseAdmin.storage.from(UPLOAD_BUCKET).createSignedUploadUrl(path)
+    if (error) return fail(error.message)
+    const url = supabaseAdmin.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl
+    return { ok: true, data: { path, token: data.token, url } }
   })
 }
 
