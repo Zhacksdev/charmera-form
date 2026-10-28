@@ -16,6 +16,10 @@ create table if not exists packages (
 alter table packages add column if not exists items text[] not null default '{}';
 alter table packages add column if not exists included_charms integer not null default 0;
 alter table packages add column if not exists sort_order integer not null default 0;
+-- What a set contains: plain bracelets, custom photo charms and custom keychains (included_charms = catalog charms).
+alter table packages add column if not exists bracelet_count integer not null default 1;
+alter table packages add column if not exists included_custom_charms integer not null default 0;
+alter table packages add column if not exists included_keychains integer not null default 0;
 
 create table if not exists charms (
   id uuid primary key default gen_random_uuid(),

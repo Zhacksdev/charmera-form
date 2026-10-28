@@ -15,10 +15,13 @@ interface DragState {
 const DRAG_THRESHOLD = 6
 
 // Drag with a pointer (works for touch and mouse), or tap one slot then another to swap.
-export function SlotBoard({ slots, charmsById, onChange }: {
+// With several bracelets the board shows one row per bracelet of `groupSize` slots. Indexes stay global,
+// so a charm can also be moved to another bracelet.
+export function SlotBoard({ slots, charmsById, onChange, groupSize = slots.length }: {
   slots: (CharmPick | null)[]
   charmsById: Map<string, ShopCharm>
   onChange: (slots: (CharmPick | null)[]) => void
+  groupSize?: number
 }) {
   const [selected, setSelected] = useState<number | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -74,33 +77,54 @@ export function SlotBoard({ slots, charmsById, onChange }: {
   }
 
   const dragged = drag ? slots[drag.from] : null
+  const size = Math.max(1, groupSize)
+  const groupStarts = Array.from({ length: Math.ceil(slots.length / size) }, (_, g) => g * size)
+  const grouped = groupStarts.length > 1
+  // The bracelet being filled now: the first one with a free slot.
+  const current = groupStarts.findIndex(first => slots.slice(first, first + size).includes(null))
 
   return (
     <>
-      <div className="slot-grid" style={{ '--slot-cols': Math.min(slots.length, 9) } as React.CSSProperties}>
-        {slots.map((pick, i) => (
-          <button
-            key={i}
-            type="button"
-            data-slot={i}
-            className={[
-              'slot',
-              selected === i && 'is-selected',
-              drag?.over === i && drag.from !== i && 'is-target',
-              drag?.from === i && 'is-dragging',
-            ].filter(Boolean).join(' ')}
-            aria-label={`Posisi ${i + 1}: ${pickLabel(pick, charmsById)}`}
-            aria-pressed={selected === i}
-            onPointerDown={e => handlePointerDown(e, i)}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={() => { start.current = null; setDrag(null) }}
-            onClick={() => handleClick(i)}
-          >
-            {pick ? <PickArt pick={pick} charmsById={charmsById} /> : <PhotoLink alt="" />}
-          </button>
-        ))}
-      </div>
+      {groupStarts.map((first, g) => {
+        const group = slots.slice(first, first + size)
+        return (
+          <div key={first} className={grouped ? `slot-group ${g === current ? 'is-current' : ''}` : undefined}>
+            {grouped && (
+              <p className="slot-group-title">
+                Gelang {g + 1}
+                <span>{group.filter(Boolean).length}/{group.length}{g === current ? ' · sedang diisi' : ''}</span>
+              </p>
+            )}
+            <div className="slot-grid" style={{ '--slot-cols': Math.min(size, 9) } as React.CSSProperties}>
+              {group.map((pick, offset) => {
+                const i = first + offset
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    data-slot={i}
+                    className={[
+                      'slot',
+                      selected === i && 'is-selected',
+                      drag?.over === i && drag.from !== i && 'is-target',
+                      drag?.from === i && 'is-dragging',
+                    ].filter(Boolean).join(' ')}
+                    aria-label={`${grouped ? `Gelang ${g + 1}, posisi` : 'Posisi'} ${offset + 1}: ${pickLabel(pick, charmsById)}`}
+                    aria-pressed={selected === i}
+                    onPointerDown={e => handlePointerDown(e, i)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={() => { start.current = null; setDrag(null) }}
+                    onClick={() => handleClick(i)}
+                  >
+                    {pick ? <PickArt pick={pick} charmsById={charmsById} /> : <PhotoLink alt="" />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
       {drag && dragged && (
         <div className="drag-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden="true">
           <PickArt pick={dragged} charmsById={charmsById} />

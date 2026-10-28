@@ -29,6 +29,9 @@ export type Database = {
           description: string | null
           items?: string[] | null
           included_charms?: number | null
+          included_custom_charms?: number | null
+          bracelet_count?: number | null
+          included_keychains?: number | null
           sort_order?: number | null
           is_active: boolean
           created_at: string
@@ -41,6 +44,9 @@ export type Database = {
           description?: string | null
           items?: string[] | null
           included_charms?: number | null
+          included_custom_charms?: number | null
+          bracelet_count?: number | null
+          included_keychains?: number | null
           sort_order?: number | null
           is_active?: boolean
           created_at?: string
@@ -53,6 +59,9 @@ export type Database = {
           description?: string | null
           items?: string[] | null
           included_charms?: number | null
+          included_custom_charms?: number | null
+          bracelet_count?: number | null
+          included_keychains?: number | null
           sort_order?: number | null
           is_active?: boolean
           created_at?: string

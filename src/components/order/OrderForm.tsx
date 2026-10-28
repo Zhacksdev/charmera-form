@@ -7,7 +7,8 @@ import type { Json, OrderInsert, Package } from '@/lib/supabase'
 import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generated'
 import {
   DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
-  formatRupiah, isKeychainReady, keychainHasPhoto, keychainUnitPrice, newOrderCode, summarizeBracelet, toShopCharm, toShopConfig,
+  formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainUnitPrice, newOrderCode, packageContents, packageShortfall,
+  resizeSlots, summarizeBracelet, toShopCharm, toShopConfig,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
 import { renderKeychainSide } from '@/lib/keychain'
@@ -58,6 +59,8 @@ export function OrderForm() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [completed, setCompleted] = useState<CompletedOrder | null>(null)
+  // Shown when the chosen set still misses something; 'checkout' still lets the customer look at the total.
+  const [shortfallFor, setShortfallFor] = useState<'checkout' | 'submit' | null>(null)
 
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -108,25 +111,33 @@ export function OrderForm() {
   const selectedPackage = packages.find(p => p.id === packageId)
   const bracelet = summarizeBracelet(selectedPackage, slots, charmsById, config)
   const hasCharms = slots.some(Boolean)
+  const contents = packageContents(selectedPackage)
+  const includedKeychains = selectedPackage ? contents.keychains : 0
   const keychainActive = keychainHasPhoto(keychain)
   const keychainUnit = keychainUnitPrice(keychain, config)
-  const keychainTotal = keychainActive ? keychainUnit * keychain.qty : 0
+  const keychainCost = keychainCharge(keychain, config, includedKeychains)
+  const keychainTotal = keychainCost.total
   const total = bracelet.total + keychainTotal
+  const shortfall = packageShortfall(selectedPackage, slots, keychain)
 
   const lines: ReceiptLine[] = []
   if (selectedPackage) {
-    const details = ['Plain Bracelet 1x']
+    const details = [`Plain Bracelet ${contents.bracelets}x`]
     if (bracelet.catalogCount) {
       details.push(`Charm Non Custom ${bracelet.catalogCount}x${bracelet.includedUsed ? ` (${bracelet.includedUsed} termasuk set)` : ''}`)
     }
-    if (bracelet.customCount) details.push(`Charm Custom ${bracelet.customCount}x`)
+    if (bracelet.customCount) {
+      details.push(`Charm Custom ${bracelet.customCount}x${bracelet.includedCustomUsed ? ` (${bracelet.includedCustomUsed} termasuk set)` : ''}`)
+    }
     lines.push({ tab: 'charm', title: `Italian Charm (${selectedPackage.name})`, details, price: bracelet.total })
   }
   if (keychainActive) {
     lines.push({
-      tab: 'keychain',
+      tab: keychainCost.included ? 'charm' : 'keychain',
       title: 'Keychain Custom',
-      details: [`Keychain ${SHAPE_LABEL[keychain.shape]} ${keychain.doubleSided ? 'Bolak Balik' : 'Satu Sisi'} ${keychain.qty}x`],
+      details: [
+        `Keychain ${SHAPE_LABEL[keychain.shape]} ${keychain.doubleSided ? 'Bolak Balik' : 'Satu Sisi'} ${keychain.qty}x${keychainCost.included ? ` (${keychainCost.included} termasuk set)` : ''}`,
+      ],
       price: keychainTotal,
     })
   }
@@ -137,10 +148,44 @@ export function OrderForm() {
     window.scrollTo({ top, behavior: 'smooth' })
   }
 
+  // Going to checkout with an unfinished set first shows what is missing.
+  function requestCheckout() {
+    if (shortfall.length && tab !== 'checkout') setShortfallFor('checkout')
+    else goTo('checkout')
+  }
+
+  function completeSet() {
+    setShortfallFor(null)
+    setTab('charm')
+    const keychainMissing = contents.keychains > 0 && !isKeychainReady(keychain)
+    // Wait for the charm tab to render before scrolling to the part that needs filling.
+    setTimeout(() => {
+      const target = keychainMissing ? document.getElementById('package-keychain') : tabsRef.current
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+  }
+
+  function selectPackage(id: string) {
+    const nextId = packageId === id ? '' : id
+    const next = packages.find(p => p.id === nextId)
+    const nextContents = packageContents(next)
+    const { slots: resized, dropped } = resizeSlots(slots, nextContents.bracelets * config.slotCount)
+    for (const pick of dropped) {
+      if (pick.kind !== 'custom') continue
+      URL.revokeObjectURL(pick.preview)
+      URL.revokeObjectURL(pick.photo.src)
+    }
+    if (dropped.length) notify(`${dropped.length} charm dilepas karena tidak muat di set ini.`)
+    setPackageId(nextId)
+    setSlots(resized)
+    if (next && keychain.qty < nextContents.keychains) setKeychain(k => ({ ...k, qty: nextContents.keychains }))
+  }
+
   function validate(): CheckoutErrors {
     const next: CheckoutErrors = {}
     if (lines.length === 0 && !hasCharms) next.cart = 'Keranjangmu masih kosong.'
     else if (hasCharms && !selectedPackage) next.cart = 'Pilih set gelangnya dulu di tab Italian Charm.'
+    else if (shortfall.length) next.cart = shortfall[0]
     else if (keychainActive && !isKeychainReady(keychain)) next.cart = 'Keychain bolak balik butuh foto untuk dua sisi.'
     if (!customer.name.trim()) next.name = 'Isi nama kamu.'
     if (customer.phone.replace(/\D/g, '').length < 9) next.phone = 'Nomor telepon belum valid.'
@@ -153,6 +198,10 @@ export function OrderForm() {
   async function handleSubmit() {
     const found = validate()
     setErrors(found)
+    if (shortfall.length) {
+      setShortfallFor('submit')
+      return
+    }
     const first = Object.values(found)[0]
     if (first) {
       notify(first)
@@ -168,23 +217,27 @@ export function OrderForm() {
       if (selectedPackage) {
         const slotItems = await Promise.all(slots.map(async (pick, i) => {
           if (!pick) return null
+          // position counts within its bracelet (1..slot_count); bracelet is 1-based.
+          const where = { bracelet: Math.floor(i / config.slotCount) + 1, position: (i % config.slotCount) + 1 }
           if (pick.kind === 'custom') {
             const [url, original] = await Promise.all([
               uploadOrderFile(code, `charm-custom-${i + 1}`, pick.crop),
               uploadOrderFile(code, `charm-custom-${i + 1}-original`, pick.photo.file),
             ])
-            return { position: i + 1, kind: 'custom', photo_url: url, original_url: original, zoom: pick.photo.zoom, price: config.customCharmPrice }
+            return { ...where, kind: 'custom', photo_url: url, original_url: original, zoom: pick.photo.zoom, price: config.customCharmPrice }
           }
           const charm = charmsById.get(pick.charmId)
-          return { position: i + 1, kind: 'catalog', charm_id: pick.charmId, name: charm?.name ?? null, image: charm?.image ?? null, price: charm?.price ?? config.charmPrice }
+          return { ...where, kind: 'catalog', charm_id: pick.charmId, name: charm?.name ?? null, image: charm?.image ?? null, price: charm?.price ?? config.charmPrice }
         }))
         items.push({
           type: 'italian_charm',
           package_id: selectedPackage.id,
           package_name: selectedPackage.name,
           package_price: selectedPackage.price,
+          bracelet_count: contents.bracelets,
           included_charms: bracelet.includedUsed,
-          slot_count: slots.length,
+          included_custom_charms: bracelet.includedCustomUsed,
+          slot_count: config.slotCount,
           slots: slotItems,
           subtotal: bracelet.total,
         })
@@ -208,6 +261,7 @@ export function OrderForm() {
           double_sided: keychain.doubleSided,
           quantity: keychain.qty,
           unit_price: keychainUnit,
+          included_in_package: keychainCost.included,
           sides: uploaded,
           subtotal: keychainTotal,
         })
@@ -225,7 +279,7 @@ export function OrderForm() {
         package_name: lines.map(line => line.title).join(' + '),
         package_price: selectedPackage?.price ?? 0,
         charms: pickedNames,
-        slot_count: selectedPackage ? slots.length : 0,
+        slot_count: selectedPackage ? config.slotCount : 0,
         photo_url: keychainFrontUrl,
         zoom_level: keychain.photos.front?.zoom ?? 1,
         quantity: keychainActive ? keychain.qty : 1,
@@ -273,7 +327,15 @@ export function OrderForm() {
   }
 
   const cartCount = lines.length
-  const summary = <SummaryCard lines={lines} total={total} onCheckout={() => goTo('checkout')} />
+  const summary = <SummaryCard lines={lines} total={total} onCheckout={requestCheckout} />
+  const keychainNote = includedKeychains > 0 && (
+    <p className="muted hint">
+      {includedKeychains}x keychain sudah termasuk {selectedPackage?.name}; keychain selebihnya {formatRupiah(keychainUnit)}/pcs.
+      {keychain.doubleSided && config.keychainDoublePrice > config.keychainPrice && (
+        <> Bolak balik menambah {formatRupiah(config.keychainDoublePrice - config.keychainPrice)}/pcs.</>
+      )}
+    </p>
+  )
 
   return (
     <div className="shop" style={{ '--charm-aspect': `${CHARM_TILE_WIDTH} / ${CHARM_TILE_HEIGHT}` } as React.CSSProperties}>
@@ -294,7 +356,7 @@ export function OrderForm() {
                   type="button"
                   className={`tab ${tab === t.id ? 'is-active' : ''}`}
                   aria-current={tab === t.id ? 'page' : undefined}
-                  onClick={() => goTo(t.id)}
+                  onClick={() => (t.id === 'checkout' ? requestCheckout() : goTo(t.id))}
                 >
                   {t.label}
                   {t.id === 'checkout' && cartCount > 0 && (
@@ -313,18 +375,38 @@ export function OrderForm() {
                 charmsById={charmsById}
                 config={config}
                 packageId={packageId}
-                onSelectPackage={id => setPackageId(current => (current === id ? '' : id))}
+                onSelectPackage={selectPackage}
                 slots={slots}
                 onSlotsChange={setSlots}
                 note={note}
                 onNoteChange={setNote}
                 notify={notify}
                 aside={summary}
+                keychainReady={isKeychainReady(keychain)}
+                packageKeychain={includedKeychains > 0 && (
+                  <KeychainBuilder
+                    embedded
+                    draft={keychain}
+                    shapes={config.keychainShapes}
+                    onChange={setKeychain}
+                    notify={notify}
+                    minQty={includedKeychains}
+                    note={keychainNote}
+                  />
+                )}
               />
             )}
 
             {tab === 'keychain' && (
-              <KeychainBuilder draft={keychain} shapes={config.keychainShapes} onChange={setKeychain} notify={notify} aside={summary} />
+              <KeychainBuilder
+                draft={keychain}
+                shapes={config.keychainShapes}
+                onChange={setKeychain}
+                notify={notify}
+                aside={summary}
+                minQty={Math.max(1, includedKeychains)}
+                note={keychainNote}
+              />
             )}
 
             {tab === 'checkout' && (
@@ -363,7 +445,41 @@ export function OrderForm() {
             </p>
             <div className="bottom-cta">
               <Image className="bottom-mascot" src="/assets/maskot-thx.webp" alt="" width={431} height={482} />
-              <button type="button" className="btn-primary" onClick={() => goTo('checkout')}>Checkout</button>
+              <button type="button" className="btn-primary" onClick={requestCheckout}>Checkout</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shortfallFor && selectedPackage && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setShortfallFor(null) }}>
+          <div
+            className="modal-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="shortfall-title"
+            onKeyDown={e => { if (e.key === 'Escape') setShortfallFor(null) }}
+          >
+            <Image className="modal-mascot" src="/assets/maskot-thx.webp" alt="" width={431} height={482} />
+            <h2 id="shortfall-title" className="bubble-title is-section">Paketmu belum lengkap</h2>
+            <p>Isi dulu bagian ini sebelum bayar, ya. Semuanya sudah termasuk harga {selectedPackage.name}.</p>
+            <ul className="modal-list">
+              {shortfall.map(item => <li key={item}>{item}</li>)}
+            </ul>
+            <div className="modal-actions">
+              {shortfallFor === 'checkout' && (
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={() => {
+                    setShortfallFor(null)
+                    goTo('checkout')
+                  }}
+                >
+                  Lihat total dulu
+                </button>
+              )}
+              <button type="button" className="btn-primary" onClick={completeSet} autoFocus>Lengkapi sekarang</button>
             </div>
           </div>
         </div>

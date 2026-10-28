@@ -218,6 +218,9 @@ export async function savePackage(pkg: Partial<Package>): Promise<Result> {
       description: pkg.description || null,
       items: pkg.items?.map(i => i.trim()).filter(Boolean) ?? [],
       included_charms: price(pkg.included_charms) ?? 0,
+      bracelet_count: Math.max(1, price(pkg.bracelet_count) ?? 1),
+      included_custom_charms: price(pkg.included_custom_charms) ?? 0,
+      included_keychains: price(pkg.included_keychains) ?? 0,
       is_active: pkg.is_active ?? true,
     }
     const { error } = pkg.id
