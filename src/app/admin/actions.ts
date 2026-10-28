@@ -392,7 +392,9 @@ export async function importOrders(rows: Partial<Order>[]): Promise<Result<{ add
     }
 
     if (inserts.length) {
-      const { error: insertError } = await supabaseAdmin.from('orders').insert(inserts)
+      // Rows may have different columns (empty cells are left out). Without defaultToNull: false,
+      // a column missing from one row is sent as NULL instead of the column default (created_at, quantity, charms…).
+      const { error: insertError } = await supabaseAdmin.from('orders').insert(inserts, { defaultToNull: false })
       if (insertError) return fail(`Gagal menambah pesanan: ${insertError.message}`)
     }
     const results = await Promise.all(updates.map(u => supabaseAdmin.from('orders').update(u.fields).eq('id', u.id)))
