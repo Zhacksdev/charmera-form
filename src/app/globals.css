@@ -180,6 +180,7 @@ body {
   transition: transform .15s ease;
 }
 .set-card-inner {
+  position: relative;
   display: grid;
   border-radius: 14px;
   transform-style: preserve-3d;
@@ -204,7 +205,9 @@ body {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
-.set-face.is-back { transform: rotateY(180deg); justify-content: flex-start; gap: 6px; overflow-y: auto; padding: 10px 6px; background: var(--cream); }
+/* The back sits on top of the front instead of sharing its grid cell, so a long description scrolls
+   inside the card rather than making every card in the row taller. */
+.set-face.is-back { position: absolute; inset: 0; transform: rotateY(180deg); justify-content: flex-start; gap: 6px; overflow-y: auto; padding: 10px 6px; background: var(--cream); }
 .set-back-title { color: var(--cherry); font-weight: 800; font-size: 12px; }
 .set-description { color: var(--char); font-size: 11.5px; line-height: 1.4; text-align: left; white-space: pre-line; }
 .set-flip { border: 0; background: none; padding: 2px 0; color: var(--cherry); font-size: 11.5px; font-weight: 800; text-decoration: underline; }

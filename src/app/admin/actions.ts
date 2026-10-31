@@ -6,7 +6,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { UPLOAD_BUCKET } from '@/lib/supabase'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import type { Charm, Order, OrderInsert, Package, Settings } from '@/lib/supabase'
-import { FALLBACK_PACKAGES, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, newOrderCode } from '@/lib/order'
+import { FALLBACK_PACKAGES, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, newOrderCode, sortCharms } from '@/lib/order'
 import { CHARM_CATALOG_COUNT } from '@/lib/charm-catalog.generated'
 import type { KeychainShape } from '@/lib/order'
 
@@ -138,7 +138,7 @@ export async function loadAdminData(): Promise<Result<AdminData>> {
         settings: settingsRes.data,
         orders: ordersRes.data ?? [],
         packages: packagesRes.data ?? [],
-        charms: charmsRes.data ?? [],
+        charms: sortCharms(charmsRes.data ?? []),
       },
     }
   })

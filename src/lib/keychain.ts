@@ -106,3 +106,78 @@ async function renderPhoto(box: Box, photo: SidePhoto, outputWidth: number, path
     canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Gagal menyiapkan foto'))), 'image/png'),
   )
 }
+
+// One cell of the bracelet layout picture: catalog art drawn as-is, a custom photo drawn inside a link frame.
+export type LayoutTile = { src: string | null; framed: boolean; label: string } | null
+
+// A picture of the arranged bracelets (one row per bracelet), so the admin sees exactly how the charms were placed.
+export async function renderBoardLayout(tiles: LayoutTile[], perRow: number, scale = 1.5) {
+  const tw = CHARM_TILE_WIDTH * scale
+  const th = CHARM_TILE_HEIGHT * scale
+  const pad = 24
+  const labelH = 34
+  const rows = Math.max(1, Math.ceil(tiles.length / perRow))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(pad * 2 + tw * perRow)
+  canvas.height = Math.round(pad + rows * (labelH + th + pad))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Browser tidak mendukung canvas')
+  ctx.fillStyle = '#fff8ef'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  const images = await Promise.all(tiles.map(t => (t?.src ? loadCorsImage(t.src).catch(() => null) : null)))
+  tiles.forEach((tile, i) => {
+    const row = Math.floor(i / perRow)
+    const x = pad + (i % perRow) * tw
+    const y = pad + row * (labelH + th + pad) + labelH
+    if (i % perRow === 0) {
+      ctx.fillStyle = '#b3262f'
+      ctx.font = 'bold 22px sans-serif'
+      ctx.textBaseline = 'alphabetic'
+      ctx.fillText(rows > 1 ? `Gelang ${row + 1}` : 'Gelang', pad, y - 10)
+    }
+    const img = images[i]
+    if (!tile) {
+      ctx.fillStyle = '#e8e2da'
+      ctx.fillRect(x + 2, y + 2, tw - 4, th - 4)
+    } else if (tile.framed || !img) {
+      // Silver link with the photo (or the charm name) in its window, like `.link-frame`.
+      const g = ctx.createLinearGradient(0, y, 0, y + th)
+      g.addColorStop(0, '#fbfbfd'); g.addColorStop(0.45, '#c3c8d3'); g.addColorStop(0.6, '#eef0f4'); g.addColorStop(1, '#a9afbb')
+      ctx.fillStyle = g
+      ctx.fillRect(x + 1, y + 1, tw - 2, th - 2)
+      const wx = x + tw * 0.08, wy = y + tw * 0.09, ww = tw * 0.84, wh = th - tw * 0.18
+      if (img) ctx.drawImage(img, wx, wy, ww, wh)
+      else {
+        ctx.fillStyle = '#26211f'
+        ctx.font = `bold ${Math.round(13 * scale)}px sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(tile.label.slice(0, 14), x + tw / 2, y + th / 2, ww)
+        ctx.textAlign = 'start'
+      }
+    } else {
+      const k = Math.min(tw / img.naturalWidth, th / img.naturalHeight)
+      const w = img.naturalWidth * k, h = img.naturalHeight * k
+      ctx.drawImage(img, x + (tw - w) / 2, y + (th - h) / 2, w, h)
+    }
+    ctx.strokeStyle = '#8d93a3'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, y + 0.5, tw - 1, th - 1)
+  })
+
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Gagal menyiapkan gambar susunan'))), 'image/png'),
+  )
+}
+
+// Charm art from Supabase Storage is cross-origin; without CORS mode the canvas could not be exported.
+function loadCorsImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image()
+    if (!src.startsWith('blob:') && !src.startsWith('/')) img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Gambar tidak bisa dibaca'))
+    img.src = src
+  })
+}

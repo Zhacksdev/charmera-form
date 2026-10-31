@@ -8,10 +8,11 @@ import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generat
 import {
   DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
   formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainMissingMessage, keychainReadyCount, keychainUnitPrice,
-  newOrderCode, packageContents, packageShortfall, resizeBoard, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
+  newOrderCode, packageContents, packageShortfall, resizeBoard, sortCharms, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
-import { renderKeychainSide } from '@/lib/keychain'
+import { renderBoardLayout, renderKeychainSide } from '@/lib/keychain'
+import type { LayoutTile } from '@/lib/keychain'
 import { uploadOrderFile, validateImage } from '@/lib/uploads'
 import { BraceletBuilder } from './BraceletBuilder'
 import { KeychainBuilder } from './KeychainBuilder'
@@ -33,7 +34,7 @@ async function loadSettings() {
 }
 
 const EMPTY_CUSTOMER: CustomerInfo = { name: '', phone: '', email: '', instagram: '', pickup: '' }
-const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 1, photos: [{}] }
+const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 0, photos: [] }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'charm', label: 'Italian Charm' },
@@ -97,7 +98,7 @@ export function OrderForm() {
       setKeychain(k => (nextConfig.keychainShapes.includes(k.shape) ? k : { ...k, shape: nextConfig.keychainShapes[0] }))
       if (pkgRes.data?.length) setPackages(pkgRes.data)
       // Older rows only have emoji; use the photo catalog until charms with images are added.
-      const withArt = (charmRes.data ?? []).filter(c => c.image_url || c.catalog_index)
+      const withArt = sortCharms(charmRes.data ?? []).filter(c => c.image_url || c.catalog_index)
       setCharms(
         withArt.length
           ? withArt.map((c, i) => toShopCharm(c, nextConfig.charmPrice, i))
@@ -233,8 +234,22 @@ export function OrderForm() {
           const charm = charmsById.get(pick.charmId)
           return { ...where, kind: 'catalog', charm_id: pick.charmId, name: charm?.name ?? null, image: charm?.image ?? null, price: charm?.price ?? config.charmPrice }
         }))
+        // A picture of the arrangement for the admin; the order still goes through if it can't be made.
+        let layoutUrl: string | null = null
+        try {
+          const tiles: LayoutTile[] = slots.map(pick => {
+            if (!pick) return null
+            if (pick.kind === 'custom') return { src: pick.preview, framed: true, label: 'Custom' }
+            const charm = charmsById.get(pick.charmId)
+            return { src: charm?.image ?? null, framed: false, label: charm?.emoji || charm?.name || 'Charm' }
+          })
+          layoutUrl = await uploadOrderFile(code, 'susunan-charm', await renderBoardLayout(tiles, config.slotCount))
+        } catch (error) {
+          console.warn('Gambar susunan charm gagal dibuat', error)
+        }
         items.push({
           type: 'italian_charm',
+          layout_url: layoutUrl,
           package_id: selectedPackage.id,
           package_name: selectedPackage.name,
           package_price: selectedPackage.price,
@@ -419,7 +434,7 @@ export function OrderForm() {
                 onChange={setKeychain}
                 notify={notify}
                 aside={summary}
-                minQty={Math.max(1, includedKeychains)}
+                minQty={includedKeychains}
                 note={keychainNote}
               />
             )}

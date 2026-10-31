@@ -189,6 +189,7 @@ type OrderItem = {
   quantity?: number
   subtotal?: number
   bracelet_count?: number
+  layout_url?: string | null
   slots?: ({ position: number; bracelet?: number; kind: string; name?: string | null; photo_url?: string; original_url?: string } | null)[]
   sides?: KeychainSides
   keychains?: { index: number; sides: KeychainSides }[]
@@ -221,6 +222,12 @@ function OrderDetails({ order }: { order: Order }) {
                 : `Italian Charm (${item.package_name})`}
               {item.subtotal !== undefined && <span className="text-cherry"> · Rp {item.subtotal.toLocaleString('id')}</span>}
             </p>
+            {item.layout_url && (
+              <a href={item.layout_url} target="_blank" rel="noreferrer" className="mt-2 block" title="Buka gambar susunan charm">
+                <img src={item.layout_url} alt="Susunan charm di gelang" className="w-full rounded-lg border border-line bg-cream" />
+                <span className="mt-1 block text-xs text-char/60">Susunan charm (klik untuk memperbesar)</span>
+              </a>
+            )}
             {item.slots && (
               <ol className="mt-1 list-decimal pl-5">
                 {item.slots.map((slot, i) => slot && (

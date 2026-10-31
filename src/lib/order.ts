@@ -92,6 +92,14 @@ export const FALLBACK_CHARMS: ShopCharm[] = Array.from({ length: CHARM_CATALOG_C
   emoji: '',
 }))
 
+// Alphabetical by name (numbers in natural order, so "Charm 2" comes before "Charm 10"); unnamed charms last.
+export function sortCharms<T extends Pick<Charm, 'name' | 'sort_order'>>(charms: T[]): T[] {
+  return [...charms].sort((a, b) => {
+    if (!a.name !== !b.name) return a.name ? -1 : 1
+    return (a.name ?? '').localeCompare(b.name ?? '', 'id', { numeric: true, sensitivity: 'base' }) || a.sort_order - b.sort_order
+  })
+}
+
 export function toShopCharm(charm: Charm, fallbackPrice: number, position: number): ShopCharm {
   const image = charm.image_url || (charm.catalog_index ? catalogImage(charm.catalog_index) : null)
   return {

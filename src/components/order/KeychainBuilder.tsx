@@ -50,7 +50,7 @@ function KeychainArt({ shape, photo, clipId, children }: {
 }
 
 // `embedded` renders just the designer and quantity, for a keychain that comes with a set.
-export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty = 1, note, embedded = false }: {
+export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty = 0, note, embedded = false }: {
   draft: KeychainDraft
   shapes: KeychainShape[]
   onChange: (draft: KeychainDraft) => void
@@ -67,7 +67,9 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   const panStart = useRef<{ x: number; y: number; dx: number; dy: number } | null>(null)
   const clipId = `keychain-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
-  const current = Math.min(index, draft.qty - 1)
+  // With zero keychains ordered the mockup is locked until the customer raises the quantity.
+  const locked = draft.qty === 0
+  const current = Math.max(0, Math.min(index, draft.qty - 1))
   const activeSide: KeychainSide = draft.doubleSided ? side : 'front'
   const photo = draft.photos[current]?.[activeSide]
   const shape = KEYCHAIN_SHAPES[draft.shape]
@@ -205,10 +207,22 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
           onPointerMove={handlePointerMove}
           onPointerUp={() => { panStart.current = null }}
           onPointerCancel={() => { panStart.current = null }}
-          onClick={() => { if (!photo) fileRef.current?.click() }}
+          onClick={() => {
+            if (locked) notify('Tambah jumlah keychain dulu, baru bisa upload foto.')
+            else if (!photo) fileRef.current?.click()
+          }}
         >
           <KeychainArt shape={draft.shape} photo={photo} clipId={clipId}>
-            {!photo && (
+            {locked && (
+              <g>
+                <text x={box.x + box.w / 2} y={box.y + box.h / 2 - 6} textAnchor="middle" fontSize={30}>🔒</text>
+                <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 26} textAnchor="middle" fill="var(--cherry)" fontSize={12.5} fontWeight={700}>
+                  <tspan x={box.x + box.w / 2}>Tambah jumlah keychain</tspan>
+                  <tspan x={box.x + box.w / 2} dy={16}>dulu untuk upload foto</tspan>
+                </text>
+              </g>
+            )}
+            {!photo && !locked && (
               <g style={{ cursor: 'pointer' }}>
                 <circle cx={box.x + box.w / 2} cy={box.y + box.h / 2 - 18} r={26} fill="var(--cherry)" />
                 <path
