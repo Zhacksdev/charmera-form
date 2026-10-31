@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import type { Package } from '@/lib/supabase'
 import { formatRupiah, formatShortPrice, newUid, packageContents, packageItems } from '@/lib/order'
@@ -15,10 +15,12 @@ const PAGE_SIZE = 48
 
 export function BraceletBuilder({
   packages, charms, charmsById, config, packageId, onSelectPackage, slots, tray, onBoardChange, note, onNoteChange, notify, aside,
-  keychainReady, packageKeychain,
+  keychainReady, keychainQty, packageKeychain,
 }: {
   aside?: React.ReactNode
-  keychainReady: boolean
+  // Keychains with all their photos, out of `keychainQty` keychains in the order (0 when none).
+  keychainReady: number
+  keychainQty: number
   packageKeychain?: React.ReactNode
   packages: Package[]
   charms: ShopCharm[]
@@ -36,6 +38,7 @@ export function BraceletBuilder({
 }) {
   const [page, setPage] = useState(0)
   const [setsPage, setSetsPage] = useState(0)
+  const [setPages, setSetPages] = useState(1)
   const setsRef = useRef<HTMLDivElement>(null)
   const catalogRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -51,7 +54,17 @@ export function BraceletBuilder({
 
   const pageCount = Math.max(1, Math.ceil(charms.length / PAGE_SIZE))
   const visibleCharms = charms.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-  const setPages = Math.max(1, Math.ceil(packages.length / 3))
+
+  // How many cards fit per view depends on the screen, so the dots follow the scroller's real width.
+  useEffect(() => {
+    const el = setsRef.current
+    if (!el) return
+    const measure = () => setSetPages(Math.max(1, Math.ceil(el.scrollWidth / el.clientWidth - 0.05)))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [packages.length])
   // With several bracelets, picks wait in the tray and the customer places them on each bracelet.
   const useTray = contents.bracelets > 1
   const picks = [...slots.filter((s): s is CharmPick => s !== null), ...tray]
@@ -59,12 +72,27 @@ export function BraceletBuilder({
   const pickCounts = new Map<string, number>()
   for (const p of picks) if (p.kind === 'catalog') pickCounts.set(p.charmId, (pickCounts.get(p.charmId) ?? 0) + 1)
   const catalogCount = picks.length - customPicks.length
+  // A custom set puts its photo charms first; the catalog below is then for add-ons.
+  const customFirst = Boolean(selected && contents.customCharms > 0)
+  const includedKeychains = Math.min(contents.keychains, keychainQty)
   const checklist = selected
     ? [
+        { label: 'Italian Charm', done: true, count: `${contents.bracelets}x Plain Bracelet` },
         contents.customCharms > 0 && { label: 'Charm custom', done: customPicks.length >= contents.customCharms, count: `${Math.min(customPicks.length, contents.customCharms)}/${contents.customCharms}` },
-        contents.charms > 0 && { label: 'Charm', done: catalogCount >= contents.charms, count: `${Math.min(catalogCount, contents.charms)}/${contents.charms}` },
-        contents.keychains > 0 && { label: 'Keychain custom', done: keychainReady, count: keychainReady ? 'siap' : 'belum diisi' },
+        contents.charms > 0 && { label: 'Charm non custom', done: catalogCount >= contents.charms, count: `${Math.min(catalogCount, contents.charms)}/${contents.charms}` },
+        contents.keychains > 0 && {
+          label: 'Keychain custom',
+          done: keychainReady >= contents.keychains,
+          count: `${Math.min(keychainReady, contents.keychains)}/${contents.keychains}`,
+        },
       ].filter((item): item is { label: string; done: boolean; count: string } => Boolean(item))
+    : []
+  const addOns = selected
+    ? [
+        { label: 'Charm custom', count: customPicks.length - Math.min(customPicks.length, contents.customCharms) },
+        { label: 'Charm non custom', count: catalogCount - Math.min(catalogCount, contents.charms) },
+        { label: 'Keychain custom', count: keychainQty - includedKeychains },
+      ].filter(item => item.count > 0)
     : []
 
   function isFull() {
@@ -174,6 +202,48 @@ export function BraceletBuilder({
     if (el) el.scrollTo({ left: toPage * el.clientWidth, behavior: 'smooth' })
   }
 
+  const customSection = (
+    <section className="section" aria-labelledby="custom-title">
+      <div className="custom-row">
+        <div>
+          <h2 id="custom-title" className="bubble-title is-section">Custom Charm</h2>
+          <p className="section-note">
+            {selected && contents.customCharms > 0
+              ? `${contents.customCharms} charm custom termasuk paket, selebihnya ${formatShortPrice(config.customCharmPrice)}/charm`
+              : `Harga tiap charm ${formatShortPrice(config.customCharmPrice)}`}
+          </p>
+        </div>
+        <div className="custom-list">
+          {customPicks.map(pick => (
+            <span key={pick.uid} className="picked-item">
+              <button
+                type="button"
+                className="custom-photo-btn"
+                onClick={() => pick.kind === 'custom' && setEditing({ uid: pick.uid, photo: pick.photo })}
+                aria-label="Atur posisi foto charm custom"
+              >
+                <PhotoLink src={pick.kind === 'custom' ? pick.preview : undefined} alt="Charm custom" />
+              </button>
+              <button type="button" className="remove-dot" onClick={() => remove(pick.uid)} aria-label="Hapus charm custom">×</button>
+            </span>
+          ))}
+          <AddSlotButton onClick={uploadNew} label="Upload Foto Charm" />
+        </div>
+      </div>
+      <p className="muted hint">Setelah upload, atur posisi dan zoom foto supaya pas di charm. Ketuk fotonya untuk mengatur ulang.</p>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={e => {
+          handleFile(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+    </section>
+  )
+
   return (
     <div className="split-layout">
       <div className="split-main">
@@ -249,7 +319,7 @@ export function BraceletBuilder({
               ))}
             </div>
           )}
-          {selected && checklist.length > 0 && (
+          {selected && (
             <div className="package-checklist" aria-live="polite">
               <p className="bubble-title is-small">Isi paket {selected.name}</p>
               <ul>
@@ -259,6 +329,18 @@ export function BraceletBuilder({
                   </li>
                 ))}
               </ul>
+              <p className="package-checklist-sub">Add-on lainnya</p>
+              {addOns.length ? (
+                <ul>
+                  {addOns.map(item => (
+                    <li key={item.label}>
+                      <span aria-hidden="true">+</span> {item.label} <b>{item.count}x</b>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">Belum ada add-on. Charm atau keychain tambahan akan muncul di sini.</p>
+              )}
               {contents.bracelets > 1 && (
                 <p className="muted">
                   Paketmu berisi {contents.bracelets} gelang. Pilih charm-mu dulu, lalu pasang ke masing-masing gelang di bagian Kustomisasi.
@@ -268,12 +350,14 @@ export function BraceletBuilder({
           )}
         </section>
 
+        {customFirst && customSection}
+
         <section className="section" ref={catalogRef} aria-labelledby="catalog-title">
           <div className="section-head">
             <button type="button" className="arrow-btn" onClick={() => setPage(p => p - 1)} disabled={page === 0} aria-label="Charm sebelumnya">
               <Chevron direction="left" />
             </button>
-            <h2 id="catalog-title" className="bubble-title is-section">Pilih Charm Favoritmu</h2>
+            <h2 id="catalog-title" className="bubble-title is-section">{customFirst ? 'Tambah Charm Non Custom' : 'Pilih Charm Favoritmu'}</h2>
             <button type="button" className="arrow-btn" onClick={() => setPage(p => p + 1)} disabled={page >= pageCount - 1} aria-label="Charm berikutnya">
               <Chevron direction="right" />
             </button>
@@ -288,7 +372,7 @@ export function BraceletBuilder({
                 <span className="catalog-lock-icon" aria-hidden="true">🔒</span>
                 <p className="bubble-title is-small">Paketmu tersedia custom!</p>
                 <p>
-                  {selected.name} sudah termasuk {contents.customCharms} charm custom dari fotomu. Upload fotonya di bagian Custom Charm.
+                  {selected.name} sudah termasuk {contents.customCharms} charm custom dari fotomu. Upload fotonya di bagian Custom Charm di atas.
                 </p>
                 <p>
                   Kamu tetap bisa memilih charm non-custom sebagai add-on ({formatShortPrice(config.charmPrice)}/charm).
@@ -347,45 +431,7 @@ export function BraceletBuilder({
           <h2 id="picked-title" className="bubble-title is-label">Charm yang kamu pilih</h2>
         </section>
 
-        <section className="section" aria-labelledby="custom-title">
-          <div className="custom-row">
-            <div>
-              <h2 id="custom-title" className="bubble-title is-section">Custom Charm</h2>
-              <p className="section-note">
-                {selected && contents.customCharms > 0
-                  ? `${contents.customCharms} charm custom termasuk paket, selebihnya ${formatShortPrice(config.customCharmPrice)}/charm`
-                  : `Harga tiap charm ${formatShortPrice(config.customCharmPrice)}`}
-              </p>
-            </div>
-            <div className="custom-list">
-              {customPicks.map(pick => (
-                <span key={pick.uid} className="picked-item">
-                  <button
-                    type="button"
-                    className="custom-photo-btn"
-                    onClick={() => pick.kind === 'custom' && setEditing({ uid: pick.uid, photo: pick.photo })}
-                    aria-label="Atur posisi foto charm custom"
-                  >
-                    <PhotoLink src={pick.kind === 'custom' ? pick.preview : undefined} alt="Charm custom" />
-                  </button>
-                  <button type="button" className="remove-dot" onClick={() => remove(pick.uid)} aria-label="Hapus charm custom">×</button>
-                </span>
-              ))}
-              <AddSlotButton onClick={uploadNew} label="Upload Foto Charm" />
-            </div>
-          </div>
-          <p className="muted hint">Setelah upload, atur posisi dan zoom foto supaya pas di charm. Ketuk fotonya untuk mengatur ulang.</p>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={e => {
-              handleFile(e.target.files?.[0])
-              e.target.value = ''
-            }}
-          />
-        </section>
+        {!customFirst && customSection}
 
         <section className="section dashed-box" aria-labelledby="arrange-title">
           <div className="section-head is-center">

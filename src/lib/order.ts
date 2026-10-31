@@ -48,11 +48,14 @@ export type CharmPick =
   | { uid: string; kind: 'catalog'; charmId: string }
   | { uid: string; kind: 'custom'; photo: SidePhoto; crop: Blob; preview: string }
 
+export type KeychainPhotos = Partial<Record<KeychainSide, SidePhoto>>
+
+// Shape and sides are shared; every keychain has its own photos, so `photos` is always `qty` long.
 export interface KeychainDraft {
   shape: KeychainShape
   doubleSided: boolean
   qty: number
-  photos: Partial<Record<KeychainSide, SidePhoto>>
+  photos: KeychainPhotos[]
 }
 
 export const DEFAULT_CONFIG: ShopConfig = {
@@ -230,7 +233,7 @@ export function packageShortfall(pkg: Package | undefined, slots: (CharmPick | n
   if (custom < c.customCharms) missing.push(`Upload ${c.customCharms - custom} foto charm custom lagi (${custom}/${c.customCharms}).`)
   if (catalog < c.charms) missing.push(`Pilih ${c.charms - catalog} charm lagi (${catalog}/${c.charms}).`)
   if (c.keychains > 0 && !isKeychainReady(draft)) {
-    missing.push(draft.doubleSided && draft.photos.front ? 'Upload foto sisi belakang keychain.' : 'Isi foto keychain custom di paketmu.')
+    missing.push(keychainMissingMessage(draft))
   } else if (draft.qty < c.keychains) {
     missing.push(`Jumlah keychain minimal ${c.keychains}.`)
   }
@@ -255,12 +258,35 @@ export function keychainUnitPrice(draft: KeychainDraft, config: ShopConfig) {
   return draft.doubleSided ? config.keychainDoublePrice : config.keychainPrice
 }
 
+// Resize to `qty` keychains; the photos of removed keychains are returned so the caller can release them.
+export function withKeychainQty(draft: KeychainDraft, qty: number) {
+  const photos = draft.photos.slice(0, qty)
+  while (photos.length < qty) photos.push({})
+  return { draft: { ...draft, qty, photos }, dropped: draft.photos.slice(qty) }
+}
+
+export function isKeychainPhotoReady(photos: KeychainPhotos | undefined, doubleSided: boolean) {
+  return Boolean(photos?.front && (!doubleSided || photos.back))
+}
+
+export function keychainReadyCount(draft: KeychainDraft) {
+  return draft.photos.slice(0, draft.qty).filter(p => isKeychainPhotoReady(p, draft.doubleSided)).length
+}
+
 export function isKeychainReady(draft: KeychainDraft) {
-  return Boolean(draft.photos.front && (!draft.doubleSided || draft.photos.back))
+  return draft.qty > 0 && keychainReadyCount(draft) === draft.qty
 }
 
 export function keychainHasPhoto(draft: KeychainDraft) {
-  return Boolean(draft.photos.front || draft.photos.back)
+  return draft.photos.some(p => p.front || p.back)
+}
+
+export function keychainMissingMessage(draft: KeychainDraft) {
+  const missing = draft.qty - keychainReadyCount(draft)
+  const sides = draft.doubleSided ? ' (sisi depan & belakang)' : ''
+  return draft.qty === 1
+    ? `Upload foto keychain custom${sides}.`
+    : `Upload foto untuk ${missing} keychain lagi${sides} (${draft.qty - missing}/${draft.qty}).`
 }
 
 export const SHAPE_LABEL: Record<KeychainShape, string> = {

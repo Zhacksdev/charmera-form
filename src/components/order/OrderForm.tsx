@@ -7,8 +7,8 @@ import type { Json, OrderInsert, Package } from '@/lib/supabase'
 import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generated'
 import {
   DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
-  formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainUnitPrice, newOrderCode, packageContents, packageShortfall,
-  resizeBoard, summarizeBracelet, toShopCharm, toShopConfig,
+  formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainMissingMessage, keychainReadyCount, keychainUnitPrice,
+  newOrderCode, packageContents, packageShortfall, resizeBoard, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
 import { renderKeychainSide } from '@/lib/keychain'
@@ -33,7 +33,7 @@ async function loadSettings() {
 }
 
 const EMPTY_CUSTOMER: CustomerInfo = { name: '', phone: '', email: '', instagram: '', pickup: '' }
-const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 1, photos: {} }
+const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 1, photos: [{}] }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'charm', label: 'Italian Charm' },
@@ -182,7 +182,7 @@ export function OrderForm() {
     setPackageId(nextId)
     setSlots(board.slots)
     setTray(board.tray)
-    if (next && keychain.qty < nextContents.keychains) setKeychain(k => ({ ...k, qty: nextContents.keychains }))
+    if (next && keychain.qty < nextContents.keychains) setKeychain(k => withKeychainQty(k, nextContents.keychains).draft)
   }
 
   function validate(): CheckoutErrors {
@@ -190,7 +190,7 @@ export function OrderForm() {
     if (lines.length === 0 && !hasCharms) next.cart = 'Keranjangmu masih kosong.'
     else if (hasCharms && !selectedPackage) next.cart = 'Pilih set gelangnya dulu di tab Italian Charm.'
     else if (shortfall.length) next.cart = shortfall[0]
-    else if (keychainActive && !isKeychainReady(keychain)) next.cart = 'Keychain bolak balik butuh foto untuk dua sisi.'
+    else if (keychainActive && !isKeychainReady(keychain)) next.cart = keychainMissingMessage(keychain)
     if (!customer.name.trim()) next.name = 'Isi nama kamu.'
     if (customer.phone.replace(/\D/g, '').length < 9) next.phone = 'Nomor telepon belum valid.'
     if (customer.email.trim() && !/^\S+@\S+\.\S+$/.test(customer.email.trim())) next.email = 'Format email belum benar.'
@@ -250,15 +250,20 @@ export function OrderForm() {
       let keychainFrontUrl: string | null = null
       if (keychainActive) {
         const sides = keychain.doubleSided ? (['front', 'back'] as const) : (['front'] as const)
-        const uploaded = await Promise.all(sides.map(async side => {
-          const photo = keychain.photos[side]!
-          const [print, original] = await Promise.all([
-            renderKeychainSide(keychain.shape, photo).then(blob => uploadOrderFile(code, `keychain-${side}`, blob)),
-            uploadOrderFile(code, `keychain-${side}-original`, photo.file),
-          ])
-          return { side, print_url: print, original_url: original, zoom: photo.zoom }
-        }))
-        keychainFrontUrl = uploaded[0].print_url
+        // Every keychain carries its own photos; `index` is 1-based.
+        const keychains = await Promise.all(keychain.photos.slice(0, keychain.qty).map(async (photos, k) => ({
+          index: k + 1,
+          sides: await Promise.all(sides.map(async side => {
+            const photo = photos[side]!
+            const name = `keychain-${k + 1}-${side}`
+            const [print, original] = await Promise.all([
+              renderKeychainSide(keychain.shape, photo).then(blob => uploadOrderFile(code, name, blob)),
+              uploadOrderFile(code, `${name}-original`, photo.file),
+            ])
+            return { side, print_url: print, original_url: original, zoom: photo.zoom }
+          })),
+        })))
+        keychainFrontUrl = keychains[0].sides[0].print_url
         items.push({
           type: 'keychain',
           shape: keychain.shape,
@@ -266,7 +271,7 @@ export function OrderForm() {
           quantity: keychain.qty,
           unit_price: keychainUnit,
           included_in_package: keychainCost.included,
-          sides: uploaded,
+          keychains,
           subtotal: keychainTotal,
         })
       }
@@ -285,7 +290,7 @@ export function OrderForm() {
         charms: pickedNames,
         slot_count: selectedPackage ? config.slotCount : 0,
         photo_url: keychainFrontUrl,
-        zoom_level: keychain.photos.front?.zoom ?? 1,
+        zoom_level: keychain.photos[0]?.front?.zoom ?? 1,
         quantity: keychainActive ? keychain.qty : 1,
         total_price: total,
         items,
@@ -318,7 +323,7 @@ export function OrderForm() {
       URL.revokeObjectURL(pick.preview)
       URL.revokeObjectURL(pick.photo.src)
     }
-    for (const photo of Object.values(keychain.photos)) if (photo) URL.revokeObjectURL(photo.src)
+    for (const sides of keychain.photos) for (const photo of Object.values(sides)) if (photo) URL.revokeObjectURL(photo.src)
     setPackageId('')
     setSlots(Array(config.slotCount).fill(null))
     setTray([])
@@ -391,7 +396,8 @@ export function OrderForm() {
                 onNoteChange={setNote}
                 notify={notify}
                 aside={summary}
-                keychainReady={isKeychainReady(keychain)}
+                keychainReady={keychainReadyCount(keychain)}
+                keychainQty={keychainActive || includedKeychains > 0 ? keychain.qty : 0}
                 packageKeychain={includedKeychains > 0 && (
                   <KeychainBuilder
                     embedded

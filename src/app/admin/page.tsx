@@ -127,10 +127,18 @@ function toNumber(value: string) {
   return value.trim() === '' ? null : Number(value)
 }
 
+// A set includes either catalog or custom charms; the price tab edits whichever one it has.
+function isCustomPackage(pkg: Partial<Package> | undefined) {
+  return (pkg?.included_custom_charms ?? 0) > 0
+}
+
 function priceDraftFrom(settings: Settings | null, packages: Package[], charms: Charm[]): PriceDraft {
   return {
     unit: Object.fromEntries(UNIT_PRICES.map(u => [u.key, toText(settings?.[u.key])])) as Record<UnitKey, string>,
-    packages: Object.fromEntries(packages.map(p => [p.id, { price: String(p.price), included_charms: toText(p.included_charms ?? 0) }])),
+    packages: Object.fromEntries(packages.map(p => [p.id, {
+      price: String(p.price),
+      included_charms: toText(isCustomPackage(p) ? p.included_custom_charms : p.included_charms ?? 0),
+    }])),
     charms: Object.fromEntries(charms.map(c => [c.id, toText(c.price)])),
   }
 }
@@ -182,8 +190,11 @@ type OrderItem = {
   subtotal?: number
   bracelet_count?: number
   slots?: ({ position: number; bracelet?: number; kind: string; name?: string | null; photo_url?: string; original_url?: string } | null)[]
-  sides?: { side: string; print_url: string; original_url: string }[]
+  sides?: KeychainSides
+  keychains?: { index: number; sides: KeychainSides }[]
 }
+
+type KeychainSides = { side: string; print_url: string; original_url: string }[]
 
 function OrderDetails({ order }: { order: Order }) {
   const items = Array.isArray(order.items) ? (order.items as OrderItem[]) : []
@@ -228,13 +239,15 @@ function OrderDetails({ order }: { order: Order }) {
                 ))}
               </ol>
             )}
-            {item.sides?.map(side => (
-              <p key={side.side}>
+            {/* Older orders stored one photo set in `sides`; newer ones store one per keychain. */}
+            {(item.keychains ?? (item.sides ? [{ index: 1, sides: item.sides }] : [])).map(keychain => keychain.sides.map(side => (
+              <p key={`${keychain.index}-${side.side}`}>
+                {(item.keychains?.length ?? 0) > 1 && <b>Keychain {keychain.index} · </b>}
                 {side.side === 'back' ? 'Belakang' : 'Depan'}:{' '}
                 <a href={side.print_url} target="_blank" rel="noreferrer" className="underline">siap cetak</a>{' · '}
                 <a href={side.original_url} target="_blank" rel="noreferrer" className="underline">asli</a>
               </p>
-            ))}
+            )))}
           </div>
         ))}
       </div>
@@ -340,11 +353,11 @@ export default function AdminPage() {
   async function handleSavePrices() {
     const ok = await run(() => savePrices({
       unit: Object.fromEntries(UNIT_PRICES.map(u => [u.key, toNumber(prices.unit[u.key])])) as Record<UnitKey, number | null>,
-      packages: Object.entries(prices.packages).map(([id, p]) => ({
-        id,
-        price: toNumber(p.price) ?? 0,
-        included_charms: toNumber(p.included_charms) ?? 0,
-      })),
+      packages: Object.entries(prices.packages).map(([id, p]) => {
+        const count = toNumber(p.included_charms) ?? 0
+        const custom = isCustomPackage(packages.find(pkg => pkg.id === id))
+        return { id, price: toNumber(p.price) ?? 0, included_charms: custom ? 0 : count, included_custom_charms: custom ? count : 0 }
+      }),
       charms: Object.entries(prices.charms).map(([id, value]) => ({ id, price: toNumber(value) })),
     }), 'Harga disimpan.')
     if (ok) await refresh()
@@ -903,7 +916,7 @@ export default function AdminPage() {
                         />
                       </label>
                       <label className="block text-sm">
-                        Charm termasuk
+                        Charm {isCustomPackage(pkg) ? 'custom' : 'non-custom'} termasuk
                         <input
                           type="number"
                           min={0}

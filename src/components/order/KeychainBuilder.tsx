@@ -2,13 +2,52 @@
 
 import { useId, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { SHAPE_LABEL } from '@/lib/order'
+import { SHAPE_LABEL, isKeychainPhotoReady, withKeychainQty } from '@/lib/order'
 import type { KeychainDraft, KeychainShape, KeychainSide, SidePhoto } from '@/lib/order'
 import { KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, newSidePhoto, photoPlacement } from '@/lib/keychain'
 import { validateImage } from '@/lib/uploads'
 import { Chevron, Stepper } from './parts'
 
 const SIDE_LABEL: Record<KeychainSide, string> = { front: 'Sisi depan', back: 'Sisi belakang' }
+
+// Ring, shape and photo of one keychain side; `children` is drawn over the photo, under the outline.
+function KeychainArt({ shape, photo, clipId, children }: {
+  shape: KeychainShape
+  photo: SidePhoto | undefined
+  clipId: string
+  children?: React.ReactNode
+}) {
+  const { path, box, top } = KEYCHAIN_SHAPES[shape]
+  const placement = photo ? photoPlacement(box, photo) : null
+  const ringBottom = KEYCHAIN_RING.cy + KEYCHAIN_RING.r
+  return (
+    <>
+      <defs>
+        <clipPath id={clipId}>
+          <path d={path} />
+        </clipPath>
+      </defs>
+      <circle cx={KEYCHAIN_RING.cx} cy={KEYCHAIN_RING.cy} r={KEYCHAIN_RING.r} fill="none" stroke="var(--cherry)" strokeWidth={9} />
+      {top > ringBottom + 4 && (
+        <line x1={KEYCHAIN_RING.cx} y1={ringBottom} x2={KEYCHAIN_RING.cx} y2={top} stroke="var(--cherry)" strokeWidth={6} />
+      )}
+      <path d={path} fill="#FFF8EE" />
+      {photo && placement && (
+        <image
+          href={photo.src}
+          x={placement.x}
+          y={placement.y}
+          width={placement.w}
+          height={placement.h}
+          preserveAspectRatio="none"
+          clipPath={`url(#${clipId})`}
+        />
+      )}
+      {children}
+      <path d={path} fill="none" stroke="var(--cherry)" strokeWidth={7} strokeLinejoin="round" />
+    </>
+  )
+}
 
 // `embedded` renders just the designer and quantity, for a keychain that comes with a set.
 export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty = 1, note, embedded = false }: {
@@ -22,21 +61,40 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   embedded?: boolean
 }) {
   const [side, setSide] = useState<KeychainSide>('front')
+  const [index, setIndex] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const panStart = useRef<{ x: number; y: number; dx: number; dy: number } | null>(null)
   const clipId = `keychain-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
+  const current = Math.min(index, draft.qty - 1)
   const activeSide: KeychainSide = draft.doubleSided ? side : 'front'
-  const photo = draft.photos[activeSide]
+  const photo = draft.photos[current]?.[activeSide]
   const shape = KEYCHAIN_SHAPES[draft.shape]
   const zoomFill = photo ? ((photo.zoom - 1) / (MAX_ZOOM - 1)) * 100 : 0
+
+  function setCurrentPhoto(next: SidePhoto) {
+    const photos = draft.photos.map((p, i) => (i === current ? { ...p, [activeSide]: next } : p))
+    onChange({ ...draft, photos })
+  }
 
   function updatePhoto(patch: Partial<SidePhoto>) {
     if (!photo) return
     const next = { ...photo, ...patch }
-    const clamped = clampOffset(shape.box, next, next.dx, next.dy)
-    onChange({ ...draft, photos: { ...draft.photos, [activeSide]: { ...next, ...clamped } } })
+    setCurrentPhoto({ ...next, ...clampOffset(shape.box, next, next.dx, next.dy) })
+  }
+
+  function setQty(qty: number) {
+    const { draft: next, dropped } = withKeychainQty(draft, qty)
+    for (const photos of dropped) for (const p of Object.values(photos)) if (p) URL.revokeObjectURL(p.src)
+    onChange(next)
+    // Show the keychain that was just added so its photo can be uploaded right away.
+    if (qty > draft.qty) goToKeychain(qty - 1)
+  }
+
+  function goToKeychain(next: number) {
+    setIndex(next)
+    setSide('front')
   }
 
   async function handleFile(file: File | undefined) {
@@ -50,7 +108,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
     try {
       const img = await loadImage(src)
       if (photo) URL.revokeObjectURL(photo.src)
-      onChange({ ...draft, photos: { ...draft.photos, [activeSide]: newSidePhoto(file, src, img) } })
+      setCurrentPhoto(newSidePhoto(file, src, img))
     } catch {
       URL.revokeObjectURL(src)
       notify('Foto ini tidak bisa dibuka. Coba foto lain, ya.')
@@ -77,15 +135,14 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
 
   function setShape(next: KeychainShape) {
     // Re-centre photos so they still cover the new shape.
-    const photos = Object.fromEntries(
-      Object.entries(draft.photos).map(([key, p]) => [key, p && { ...p, dx: 0, dy: 0 }]),
-    ) as KeychainDraft['photos']
+    const photos = draft.photos.map(sides => Object.fromEntries(
+      Object.entries(sides).map(([key, p]) => [key, p && { ...p, dx: 0, dy: 0 }]),
+    ) as KeychainDraft['photos'][number])
     onChange({ ...draft, shape: next, photos })
   }
 
-  const placement = photo ? photoPlacement(shape.box, photo) : null
-  const ringBottom = KEYCHAIN_RING.cy + KEYCHAIN_RING.r
   const { box } = shape
+  const many = draft.qty > 1
 
   const stage = (
     <section className={`${embedded ? '' : 'split-main '}dashed-box keychain-stage`} aria-label="Desain keychain">
@@ -126,84 +183,107 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
       </div>
 
       <div className="keychain-preview">
-        <button
-          type="button"
-          className="arrow-btn"
-          onClick={() => setSide('front')}
-          disabled={!draft.doubleSided || activeSide === 'front'}
-          aria-label="Sisi depan"
-        >
-          <Chevron direction="left" />
-        </button>
+        {many && (
+          <button
+            type="button"
+            className="arrow-btn"
+            onClick={() => goToKeychain(current - 1)}
+            disabled={current === 0}
+            aria-label="Keychain sebelumnya"
+          >
+            <Chevron direction="left" />
+          </button>
+        )}
 
         <svg
           ref={svgRef}
           className={`keychain-svg ${photo ? 'has-photo' : ''}`}
           viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`}
           role="img"
-          aria-label={`Preview keychain ${SHAPE_LABEL[draft.shape]}, ${SIDE_LABEL[activeSide].toLowerCase()}`}
+          aria-label={`Preview keychain ${current + 1} ${SHAPE_LABEL[draft.shape]}, ${SIDE_LABEL[activeSide].toLowerCase()}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={() => { panStart.current = null }}
           onPointerCancel={() => { panStart.current = null }}
           onClick={() => { if (!photo) fileRef.current?.click() }}
         >
-          <defs>
-            <clipPath id={clipId}>
-              <path d={shape.path} />
-            </clipPath>
-          </defs>
-          <circle cx={KEYCHAIN_RING.cx} cy={KEYCHAIN_RING.cy} r={KEYCHAIN_RING.r} fill="none" stroke="var(--cherry)" strokeWidth={9} />
-          {shape.top > ringBottom + 4 && (
-            <line x1={KEYCHAIN_RING.cx} y1={ringBottom} x2={KEYCHAIN_RING.cx} y2={shape.top} stroke="var(--cherry)" strokeWidth={6} />
-          )}
-          <path d={shape.path} fill="#FFF8EE" />
-          {photo && placement && (
-            <image
-              href={photo.src}
-              x={placement.x}
-              y={placement.y}
-              width={placement.w}
-              height={placement.h}
-              preserveAspectRatio="none"
-              clipPath={`url(#${clipId})`}
-            />
-          )}
-          {!photo && (
-            <g style={{ cursor: 'pointer' }}>
-              <circle cx={box.x + box.w / 2} cy={box.y + box.h / 2 - 18} r={26} fill="var(--cherry)" />
-              <path
-                d={`M${box.x + box.w / 2 - 11} ${box.y + box.h / 2 - 18} h22 M${box.x + box.w / 2} ${box.y + box.h / 2 - 29} v22`}
-                stroke="var(--cream)"
-                strokeWidth={3}
-                strokeLinecap="round"
-              />
-              <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 30} textAnchor="middle" fill="var(--cherry)" fontSize={12.5} fontWeight={700}>
-                <tspan x={box.x + box.w / 2}>Upload dan sesuaikan</tspan>
-                <tspan x={box.x + box.w / 2} dy={16}>fotomu disini</tspan>
-              </text>
-            </g>
-          )}
-          <path d={shape.path} fill="none" stroke="var(--cherry)" strokeWidth={7} strokeLinejoin="round" />
+          <KeychainArt shape={draft.shape} photo={photo} clipId={clipId}>
+            {!photo && (
+              <g style={{ cursor: 'pointer' }}>
+                <circle cx={box.x + box.w / 2} cy={box.y + box.h / 2 - 18} r={26} fill="var(--cherry)" />
+                <path
+                  d={`M${box.x + box.w / 2 - 11} ${box.y + box.h / 2 - 18} h22 M${box.x + box.w / 2} ${box.y + box.h / 2 - 29} v22`}
+                  stroke="var(--cream)"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+                <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 30} textAnchor="middle" fill="var(--cherry)" fontSize={12.5} fontWeight={700}>
+                  <tspan x={box.x + box.w / 2}>Upload dan sesuaikan</tspan>
+                  <tspan x={box.x + box.w / 2} dy={16}>fotomu disini</tspan>
+                </text>
+              </g>
+            )}
+          </KeychainArt>
         </svg>
 
-        <button
-          type="button"
-          className="arrow-btn"
-          onClick={() => setSide('back')}
-          disabled={!draft.doubleSided || activeSide === 'back'}
-          aria-label="Sisi belakang"
-        >
-          <Chevron direction="right" />
-        </button>
+        {many && (
+          <button
+            type="button"
+            className="arrow-btn"
+            onClick={() => goToKeychain(current + 1)}
+            disabled={current >= draft.qty - 1}
+            aria-label="Keychain berikutnya"
+          >
+            <Chevron direction="right" />
+          </button>
+        )}
       </div>
 
-      {draft.doubleSided && <p className="side-label">{SIDE_LABEL[activeSide]}</p>}
+      {many && <p className="side-label">Keychain {current + 1} dari {draft.qty}</p>}
+      {draft.doubleSided && (
+        <div className="side-switch" role="radiogroup" aria-label="Sisi keychain">
+          {(['front', 'back'] as const).map(s => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={activeSide === s}
+              className={`pill ${activeSide === s ? 'is-active' : ''}`}
+              onClick={() => setSide(s)}
+            >
+              {SIDE_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      )}
       {photo && (
         <p className="muted hint is-center">
           Geser foto untuk mengatur posisi.{' '}
           <button type="button" className="receipt-edit" onClick={() => fileRef.current?.click()}>Ganti foto</button>
         </p>
+      )}
+
+      {many && (
+        <div className="keychain-thumbs" role="group" aria-label="Semua keychain">
+          {draft.photos.map((sides, i) => {
+            const ready = isKeychainPhotoReady(sides, draft.doubleSided)
+            return (
+              <button
+                key={i}
+                type="button"
+                className={`keychain-thumb ${i === current ? 'is-active' : ''} ${ready ? 'is-ready' : ''}`}
+                aria-pressed={i === current}
+                aria-label={`Keychain ${i + 1}${ready ? ', foto lengkap' : ', foto belum lengkap'}`}
+                onClick={() => goToKeychain(i)}
+              >
+                <svg viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`} aria-hidden="true">
+                  <KeychainArt shape={draft.shape} photo={sides.front} clipId={`${clipId}-${i}`} />
+                </svg>
+                <span className="keychain-thumb-label" aria-hidden="true">{ready ? '✓' : i + 1}</span>
+              </button>
+            )
+          })}
+        </div>
       )}
 
       <div className="shape-options" role="radiogroup" aria-label="Bentuk keychain">
@@ -237,7 +317,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   const qtyRow = (
     <div className="qty-row">
       <h2 className="bubble-title is-section">Jumlah {embedded ? 'Keychain' : 'Pesanan'}</h2>
-      <Stepper label="Jumlah keychain" value={draft.qty} min={minQty} max={50} onChange={qty => onChange({ ...draft, qty })} />
+      <Stepper label="Jumlah keychain" value={draft.qty} min={minQty} max={50} onChange={setQty} />
     </div>
   )
 

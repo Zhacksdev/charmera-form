@@ -28,7 +28,7 @@ export interface UnitPrices {
 
 export interface PriceUpdate {
   unit: UnitPrices
-  packages: { id: string; price: number; included_charms: number }[]
+  packages: { id: string; price: number; included_charms: number; included_custom_charms: number }[]
   charms: { id: string; price: number | null }[]
 }
 
@@ -168,6 +168,7 @@ export async function savePrices(update: PriceUpdate): Promise<Result> {
       ...update.packages.map(p => supabaseAdmin.from('packages').update({
         price: price(p.price) ?? 0,
         included_charms: price(p.included_charms) ?? 0,
+        included_custom_charms: price(p.included_custom_charms) ?? 0,
         updated_at: now,
       }).eq('id', p.id)),
       ...update.charms.map(c => supabaseAdmin.from('charms').update({ price: price(c.price) }).eq('id', c.id)),
