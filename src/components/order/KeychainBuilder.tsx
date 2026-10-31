@@ -2,8 +2,8 @@
 
 import { useId, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { SHAPE_LABEL, isKeychainPhotoReady, withKeychainQty } from '@/lib/order'
-import type { KeychainDraft, KeychainShape, KeychainSide, SidePhoto } from '@/lib/order'
+import { isKeychainPhotoReady, withKeychainQty } from '@/lib/order'
+import type { KeychainDraft, KeychainShape, KeychainShapeOption, KeychainSide, SidePhoto } from '@/lib/order'
 import { KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, newSidePhoto, photoPlacement } from '@/lib/keychain'
 import { validateImage } from '@/lib/uploads'
 import { Chevron, Stepper } from './parts'
@@ -52,7 +52,7 @@ function KeychainArt({ shape, photo, clipId, children }: {
 // `embedded` renders just the designer and quantity, for a keychain that comes with a set.
 export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty = 0, note, embedded = false }: {
   draft: KeychainDraft
-  shapes: KeychainShape[]
+  shapes: KeychainShapeOption[]
   onChange: (draft: KeychainDraft) => void
   notify: (message: string) => void
   aside?: React.ReactNode
@@ -72,7 +72,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   const current = Math.max(0, Math.min(index, draft.qty - 1))
   const activeSide: KeychainSide = draft.doubleSided ? side : 'front'
   const photo = draft.photos[current]?.[activeSide]
-  const shape = KEYCHAIN_SHAPES[draft.shape]
+  const shape = KEYCHAIN_SHAPES[draft.shape.outline]
   const zoomFill = photo ? ((photo.zoom - 1) / (MAX_ZOOM - 1)) * 100 : 0
 
   function setCurrentPhoto(next: SidePhoto) {
@@ -135,7 +135,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
     updatePhoto({ dx: s.dx + (e.clientX - s.x) * k, dy: s.dy + (e.clientY - s.y) * k })
   }
 
-  function setShape(next: KeychainShape) {
+  function setShape(next: KeychainShapeOption) {
     // Re-centre photos so they still cover the new shape.
     const photos = draft.photos.map(sides => Object.fromEntries(
       Object.entries(sides).map(([key, p]) => [key, p && { ...p, dx: 0, dy: 0 }]),
@@ -202,7 +202,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
           className={`keychain-svg ${photo ? 'has-photo' : ''}`}
           viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`}
           role="img"
-          aria-label={`Preview keychain ${current + 1} ${SHAPE_LABEL[draft.shape]}, ${SIDE_LABEL[activeSide].toLowerCase()}`}
+          aria-label={`Preview keychain ${current + 1} ${draft.shape.label}, ${SIDE_LABEL[activeSide].toLowerCase()}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={() => { panStart.current = null }}
@@ -212,7 +212,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
             else if (!photo) fileRef.current?.click()
           }}
         >
-          <KeychainArt shape={draft.shape} photo={photo} clipId={clipId}>
+          <KeychainArt shape={draft.shape.outline} photo={photo} clipId={clipId}>
             {locked && (
               <g>
                 <text x={box.x + box.w / 2} y={box.y + box.h / 2 - 6} textAnchor="middle" fontSize={30}>🔒</text>
@@ -253,6 +253,9 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
         )}
       </div>
 
+      <p className="keychain-size">
+        {draft.shape.label}{draft.shape.size && <> · Ukuran <b>{draft.shape.size}</b></>}
+      </p>
       {many && <p className="side-label">Keychain {current + 1} dari {draft.qty}</p>}
       {draft.doubleSided && (
         <div className="side-switch" role="radiogroup" aria-label="Sisi keychain">
@@ -291,7 +294,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
                 onClick={() => goToKeychain(i)}
               >
                 <svg viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`} aria-hidden="true">
-                  <KeychainArt shape={draft.shape} photo={sides.front} clipId={`${clipId}-${i}`} />
+                  <KeychainArt shape={draft.shape.outline} photo={sides.front} clipId={`${clipId}-${i}`} />
                 </svg>
                 <span className="keychain-thumb-label" aria-hidden="true">{ready ? '✓' : i + 1}</span>
               </button>
@@ -303,14 +306,14 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
       <div className="shape-options" role="radiogroup" aria-label="Bentuk keychain">
         {shapes.map(s => (
           <button
-            key={s}
+            key={s.id}
             type="button"
             role="radio"
-            aria-checked={draft.shape === s}
-            className={`pill ${draft.shape === s ? 'is-active' : ''}`}
+            aria-checked={draft.shape.id === s.id}
+            className={`pill ${draft.shape.id === s.id ? 'is-active' : ''}`}
             onClick={() => setShape(s)}
           >
-            {SHAPE_LABEL[s]}
+            {s.label}
           </button>
         ))}
       </div>

@@ -22,13 +22,18 @@ function heart({ x, y, w, h }: Box) {
   return `M${px(115)} ${py(216)} C${px(45)} ${py(160)} ${px(0)} ${py(120)} ${px(0)} ${py(66)} C${px(0)} ${py(28)} ${px(28)} ${py(0)} ${px(64)} ${py(0)} C${px(88)} ${py(0)} ${px(106)} ${py(13)} ${px(115)} ${py(32)} C${px(124)} ${py(13)} ${px(142)} ${py(0)} ${px(166)} ${py(0)} C${px(202)} ${py(0)} ${px(230)} ${py(28)} ${px(230)} ${py(66)} C${px(230)} ${py(120)} ${px(185)} ${py(160)} ${px(115)} ${py(216)} Z`
 }
 
-const RECT_BOX: Box = { x: 66, y: 68, w: 168, h: 224 }
+// An upright rectangle with cut corners; the box keeps the 3.1 x 4.7 cm proportion.
+function octagon({ x, y, w, h }: Box, cut: number) {
+  return `M${x + cut} ${y} H${x + w - cut} L${x + w} ${y + cut} V${y + h - cut} L${x + w - cut} ${y + h} H${x + cut} L${x} ${y + h - cut} V${y + cut} Z`
+}
+
+const RECT_BOX: Box = { x: 76, y: 68, w: 148, h: 224 }
 const SQUARE_BOX: Box = { x: 50, y: 82, w: 200, h: 200 }
 const HEART_BOX: Box = { x: 36, y: 74, w: 228, h: 214 }
 
 // `top` is where the ring's connector meets the shape.
 export const KEYCHAIN_SHAPES: Record<KeychainShape, { box: Box; path: string; top: number }> = {
-  rect: { box: RECT_BOX, path: roundedRect(RECT_BOX, 8), top: RECT_BOX.y },
+  rect: { box: RECT_BOX, path: octagon(RECT_BOX, 26), top: RECT_BOX.y },
   square: { box: SQUARE_BOX, path: roundedRect(SQUARE_BOX, 8), top: SQUARE_BOX.y },
   heart: { box: HEART_BOX, path: heart(HEART_BOX), top: HEART_BOX.y + (32 / 216) * HEART_BOX.h },
 }

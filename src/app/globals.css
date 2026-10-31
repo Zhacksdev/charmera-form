@@ -524,6 +524,8 @@ body {
 .keychain-svg { flex: 1; max-width: 300px; margin: 0 auto; touch-action: none; }
 .keychain-svg.has-photo { cursor: grab; }
 .keychain-svg.has-photo:active { cursor: grabbing; }
+.keychain-size { text-align: center; color: var(--char); font-size: 13px; margin: 6px 0 0; }
+.keychain-size b { color: var(--cherry); }
 .side-label { text-align: center; color: var(--cherry); font-weight: 800; font-size: 13px; margin: 0; }
 .side-switch { display: flex; justify-content: center; gap: 8px; margin-top: 8px; }
 .side-switch .pill { padding: 5px 12px; font-size: 12.5px; }

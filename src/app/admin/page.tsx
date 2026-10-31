@@ -4,8 +4,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
-import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems } from '@/lib/order'
-import type { KeychainShape } from '@/lib/order'
+import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems, shapeOptions } from '@/lib/order'
+import type { KeychainShape, KeychainShapeOption } from '@/lib/order'
 import {
   createCharmUpload, createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
   saveCharm, saveGeneralSettings, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
@@ -111,7 +111,7 @@ interface SettingsDraft {
   slot_count: string
   whatsapp_number: string
   pickup_options: string
-  keychain_shapes: KeychainShape[]
+  keychain_shape_options: KeychainShapeOption[]
   instagram_username: string
   tiktok_username: string
 }
@@ -149,9 +149,7 @@ function settingsDraftFrom(settings: Settings | null): SettingsDraft {
     slot_count: String(settings?.slot_count ?? DEFAULT_CONFIG.slotCount),
     whatsapp_number: settings?.whatsapp_number ?? '',
     pickup_options: (settings?.pickup_options ?? DEFAULT_CONFIG.pickupOptions).join('\n'),
-    keychain_shapes: settings?.keychain_shapes?.length
-      ? KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes?.includes(s))
-      : DEFAULT_CONFIG.keychainShapes,
+    keychain_shape_options: shapeOptions(settings),
     instagram_username: settings?.instagram_username ?? '',
     tiktok_username: settings?.tiktok_username ?? '',
   }
@@ -190,6 +188,7 @@ type OrderItem = {
   subtotal?: number
   bracelet_count?: number
   layout_url?: string | null
+  shape_size?: string | null
   slots?: ({ position: number; bracelet?: number; kind: string; name?: string | null; photo_url?: string; original_url?: string } | null)[]
   sides?: KeychainSides
   keychains?: { index: number; sides: KeychainSides }[]
@@ -218,7 +217,7 @@ function OrderDetails({ order }: { order: Order }) {
           <div key={index} className="rounded-xl border border-line p-3">
             <p className="font-semibold">
               {item.type === 'keychain'
-                ? `Keychain ${item.shape} ${item.double_sided ? 'bolak balik' : 'satu sisi'} × ${item.quantity}`
+                ? `Keychain ${SHAPE_LABEL[item.shape as KeychainShape] ?? item.shape}${item.shape_size ? ` (${item.shape_size})` : ''} ${item.double_sided ? 'bolak balik' : 'satu sisi'} × ${item.quantity}`
                 : `Italian Charm (${item.package_name})`}
               {item.subtotal !== undefined && <span className="text-cherry"> · Rp {item.subtotal.toLocaleString('id')}</span>}
             </p>
@@ -376,7 +375,7 @@ export default function AdminPage() {
       slot_count: Number(general.slot_count),
       whatsapp_number: general.whatsapp_number,
       pickup_options: general.pickup_options.split('\n'),
-      keychain_shapes: general.keychain_shapes,
+      keychain_shape_options: general.keychain_shape_options,
       instagram_username: general.instagram_username,
       tiktok_username: general.tiktok_username,
     }), 'Pengaturan disimpan.')
@@ -1395,34 +1394,79 @@ export default function AdminPage() {
               </label>
               <fieldset>
                 <legend className="font-medium mb-1">Bentuk keychain custom</legend>
-                <p className="text-xs text-char/60 mb-2">Bentuk yang nonaktif tidak bisa dipilih pelanggan. Minimal satu harus aktif.</p>
-                <div className="flex flex-wrap gap-2">
-                  {KEYCHAIN_SHAPE_IDS.map(shape => {
-                    const active = general.keychain_shapes.includes(shape)
+                <p className="text-xs text-char/60 mb-2">
+                  Nama dan ukuran tampil di bawah mockup keychain. Model outline menentukan bentuk mockup dan potongan foto cetak.
+                  Bentuk nonaktif tidak bisa dipilih pelanggan; minimal satu harus aktif.
+                </p>
+                <div className="space-y-2">
+                  {general.keychain_shape_options.map((shape, index) => {
+                    const patch = (change: Partial<KeychainShapeOption>) => setGeneral(prev => ({
+                      ...prev,
+                      keychain_shape_options: prev.keychain_shape_options.map((s, i) => (i === index ? { ...s, ...change } : s)),
+                    }))
                     return (
-                      <label
-                        key={shape}
-                        className={`flex cursor-pointer items-center gap-2 rounded-full border-2 px-4 py-2 font-semibold transition-all ${
-                          active ? 'border-cherry bg-cherry text-cream' : 'border-line bg-cream text-char/60'
+                      <div
+                        key={shape.id}
+                        className={`grid gap-2 rounded-xl border p-3 sm:grid-cols-[auto_1fr_1fr_auto_auto] sm:items-center ${
+                          shape.active ? 'border-cherry bg-cream' : 'border-line bg-char/5 opacity-70'
                         }`}
                       >
+                        <label className="flex items-center gap-2 text-sm font-semibold">
+                          <input type="checkbox" checked={shape.active} onChange={e => patch({ active: e.target.checked })} className="accent-cherry" />
+                          {shape.active ? 'Aktif' : 'Nonaktif'}
+                        </label>
                         <input
-                          type="checkbox"
-                          checked={active}
-                          onChange={e => setGeneral(prev => ({
-                            ...prev,
-                            keychain_shapes: e.target.checked
-                              ? KEYCHAIN_SHAPE_IDS.filter(s => s === shape || prev.keychain_shapes.includes(s))
-                              : prev.keychain_shapes.filter(s => s !== shape),
-                          }))}
-                          className="accent-cream"
+                          aria-label="Nama bentuk"
+                          placeholder="Nama, misal Octagonal"
+                          value={shape.label}
+                          onChange={e => patch({ label: e.target.value })}
+                          className={inputClass}
                         />
-                        {SHAPE_LABEL[shape]}
-                        <span className="text-xs font-normal">{active ? 'Aktif' : 'Nonaktif'}</span>
-                      </label>
+                        <input
+                          aria-label="Ukuran"
+                          placeholder="Ukuran, misal 3.1 x 4.7 cm"
+                          value={shape.size}
+                          onChange={e => patch({ size: e.target.value })}
+                          className={inputClass}
+                        />
+                        <select
+                          aria-label="Model outline"
+                          value={shape.outline}
+                          onChange={e => patch({ outline: e.target.value as KeychainShape })}
+                          className={inputClass}
+                        >
+                          {KEYCHAIN_SHAPE_IDS.map(outline => (
+                            <option key={outline} value={outline}>Outline {SHAPE_LABEL[outline]}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setGeneral(prev => ({
+                            ...prev,
+                            keychain_shape_options: prev.keychain_shape_options.filter((_, i) => i !== index),
+                          }))}
+                          disabled={general.keychain_shape_options.length === 1}
+                          className="text-sm font-semibold text-cherry underline disabled:opacity-40"
+                        >
+                          Hapus
+                        </button>
+                      </div>
                     )
                   })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setGeneral(prev => ({
+                    ...prev,
+                    keychain_shape_options: [
+                      ...prev.keychain_shape_options,
+                      { id: `shape-${Date.now().toString(36)}`, label: '', outline: 'rect', size: '', active: true },
+                    ],
+                  }))}
+                  className={`${secondaryButton} mt-2`}
+                >
+                  + Tambah bentuk
+                </button>
               </fieldset>
               <p className="text-xs text-char/60">Password admin diatur lewat variabel ADMIN_PASSWORD di environment.</p>
               <button

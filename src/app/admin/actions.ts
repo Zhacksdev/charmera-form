@@ -5,10 +5,10 @@ import { cookies } from 'next/headers'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { UPLOAD_BUCKET } from '@/lib/supabase'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import type { Charm, Order, OrderInsert, Package, Settings } from '@/lib/supabase'
-import { FALLBACK_PACKAGES, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, newOrderCode, sortCharms, sortPackages } from '@/lib/order'
+import type { Charm, Json, Order, OrderInsert, Package, Settings } from '@/lib/supabase'
+import { FALLBACK_PACKAGES, ORDER_STATUSES, newOrderCode, shapeOptions, sortCharms, sortPackages } from '@/lib/order'
 import { CHARM_CATALOG_COUNT } from '@/lib/charm-catalog.generated'
-import type { KeychainShape } from '@/lib/order'
+import type { KeychainShapeOption } from '@/lib/order'
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -37,7 +37,7 @@ export interface GeneralSettings {
   slot_count: number
   whatsapp_number: string | null
   pickup_options: string[]
-  keychain_shapes: KeychainShape[]
+  keychain_shape_options: KeychainShapeOption[]
   instagram_username: string | null
   tiktok_username: string | null
 }
@@ -180,14 +180,15 @@ export async function savePrices(update: PriceUpdate): Promise<Result> {
 
 export async function saveGeneralSettings(settings: GeneralSettings): Promise<Result> {
   return guarded(async () => {
-    const shapes = KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes.includes(s))
-    if (shapes.length === 0) return fail('Aktifkan minimal satu bentuk keychain.')
+    // Same clean-up the shop applies when reading them back.
+    const shapes = shapeOptions({ keychain_shape_options: settings.keychain_shape_options as unknown as Json })
+    if (!shapes.some(s => s.active)) return fail('Aktifkan minimal satu bentuk keychain.')
     const { error } = await supabaseAdmin.from('settings').update({
       batch_label: settings.batch_label?.trim() || null,
       slot_count: Math.min(30, Math.max(1, Math.round(Number(settings.slot_count)) || 9)),
       whatsapp_number: settings.whatsapp_number?.replace(/\D/g, '') || null,
       pickup_options: settings.pickup_options.map(o => o.trim()).filter(Boolean),
-      keychain_shapes: shapes,
+      keychain_shape_options: shapes as unknown as Json,
       instagram_username: username(settings.instagram_username),
       tiktok_username: username(settings.tiktok_username),
       updated_at: new Date().toISOString(),

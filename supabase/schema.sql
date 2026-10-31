@@ -51,6 +51,8 @@ alter table settings add column if not exists pickup_options text[];
 alter table settings add column if not exists qris_image_url text;
 -- Keychain shapes customers may choose; null means all shapes.
 alter table settings add column if not exists keychain_shapes text[];
+-- Admin-defined keychain shapes: [{ id, label, outline: rect|square|heart, size, active }]; replaces keychain_shapes.
+alter table settings add column if not exists keychain_shape_options jsonb;
 -- Shown on the thank-you page (warranty terms), without the leading @.
 alter table settings add column if not exists instagram_username text;
 alter table settings add column if not exists tiktok_username text;
@@ -103,7 +105,7 @@ create policy "public insert orders" on orders for insert with check (true);
 drop policy if exists "public read settings" on settings;
 create policy "public read settings" on settings for select using (true);
 revoke select on settings from anon;
-grant select (id, slot_count, batch_label, charm_price, custom_charm_price, keychain_price, keychain_double_price, pickup_options, qris_image_url, keychain_shapes, whatsapp_number, instagram_username, tiktok_username) on settings to anon;
+grant select (id, slot_count, batch_label, charm_price, custom_charm_price, keychain_price, keychain_double_price, pickup_options, qris_image_url, keychain_shapes, keychain_shape_options, whatsapp_number, instagram_username, tiktok_username) on settings to anon;
 
 -- ---------- Storage for customer photos and payment proofs ----------
 

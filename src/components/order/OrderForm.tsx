@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import type { Json, OrderInsert, Package } from '@/lib/supabase'
 import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generated'
 import {
-  DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
+  DEFAULT_CONFIG, DEFAULT_SHAPE_OPTIONS, FALLBACK_CHARMS, FALLBACK_PACKAGES, shapeName,
   formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainMissingMessage, keychainReadyCount, keychainUnitPrice,
   newOrderCode, packageContents, packageShortfall, resizeBoard, sortCharms, sortPackages, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
 } from '@/lib/order'
@@ -27,14 +27,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const SETTINGS_COLUMNS = 'slot_count, batch_label, charm_price, custom_charm_price, keychain_price, keychain_double_price, pickup_options, qris_image_url'
 // Added later; read separately so the form keeps working before schema.sql is re-run.
 const NEWER_SETTINGS_COLUMNS = `${SETTINGS_COLUMNS}, keychain_shapes, whatsapp_number, instagram_username, tiktok_username`
+const NEWEST_SETTINGS_COLUMNS = `${NEWER_SETTINGS_COLUMNS}, keychain_shape_options`
 
 async function loadSettings() {
+  const newest = await supabase.from('settings').select(NEWEST_SETTINGS_COLUMNS).limit(1).maybeSingle()
+  if (!newest.error) return newest
   const res = await supabase.from('settings').select(NEWER_SETTINGS_COLUMNS).limit(1).maybeSingle()
   return res.error ? supabase.from('settings').select(SETTINGS_COLUMNS).limit(1).maybeSingle() : res
 }
 
 const EMPTY_CUSTOMER: CustomerInfo = { name: '', phone: '', email: '', instagram: '', pickup: '' }
-const EMPTY_KEYCHAIN: KeychainDraft = { shape: 'rect', doubleSided: false, qty: 0, photos: [] }
+const EMPTY_KEYCHAIN: KeychainDraft = { shape: DEFAULT_SHAPE_OPTIONS[0], doubleSided: false, qty: 0, photos: [] }
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'charm', label: 'Italian Charm' },
@@ -95,7 +98,7 @@ export function OrderForm() {
       const nextConfig = toShopConfig(settingsRes.data)
       setConfig(nextConfig)
       setSlots(Array(nextConfig.slotCount).fill(null))
-      setKeychain(k => (nextConfig.keychainShapes.includes(k.shape) ? k : { ...k, shape: nextConfig.keychainShapes[0] }))
+      setKeychain(k => ({ ...k, shape: nextConfig.keychainShapes.find(s => s.id === k.shape.id) ?? nextConfig.keychainShapes[0] }))
       if (pkgRes.data?.length) setPackages(sortPackages(pkgRes.data))
       // Older rows only have emoji; use the photo catalog until charms with images are added.
       const withArt = sortCharms(charmRes.data ?? []).filter(c => c.image_url || c.catalog_index)
@@ -140,7 +143,7 @@ export function OrderForm() {
       tab: keychainCost.included ? 'charm' : 'keychain',
       title: 'Keychain Custom',
       details: [
-        `Keychain ${SHAPE_LABEL[keychain.shape]} ${keychain.doubleSided ? 'Bolak Balik' : 'Satu Sisi'} ${keychain.qty}x${keychainCost.included ? ` (${keychainCost.included} termasuk set)` : ''}`,
+        `Keychain ${shapeName(keychain.shape)} ${keychain.doubleSided ? 'Bolak Balik' : 'Satu Sisi'} ${keychain.qty}x${keychainCost.included ? ` (${keychainCost.included} termasuk set)` : ''}`,
       ],
       price: keychainTotal,
     })
@@ -272,7 +275,7 @@ export function OrderForm() {
             const photo = photos[side]!
             const name = `keychain-${k + 1}-${side}`
             const [print, original] = await Promise.all([
-              renderKeychainSide(keychain.shape, photo).then(blob => uploadOrderFile(code, name, blob)),
+              renderKeychainSide(keychain.shape.outline, photo).then(blob => uploadOrderFile(code, name, blob)),
               uploadOrderFile(code, `${name}-original`, photo.file),
             ])
             return { side, print_url: print, original_url: original, zoom: photo.zoom }
@@ -281,7 +284,9 @@ export function OrderForm() {
         keychainFrontUrl = keychains[0].sides[0].print_url
         items.push({
           type: 'keychain',
-          shape: keychain.shape,
+          shape: keychain.shape.label,
+          shape_size: keychain.shape.size || null,
+          outline: keychain.shape.outline,
           double_sided: keychain.doubleSided,
           quantity: keychain.qty,
           unit_price: keychainUnit,

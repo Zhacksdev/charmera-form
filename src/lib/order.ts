@@ -22,16 +22,57 @@ export interface ShopConfig {
   keychainDoublePrice: number
   pickupOptions: string[]
   qrisImage: string
-  keychainShapes: KeychainShape[]
+  keychainShapes: KeychainShapeOption[]
   whatsappNumber: string
   instagram: string
   tiktok: string
 }
 
+// The outline drawn in the mockup; the shapes customers see are admin-defined options built on one.
 export type KeychainShape = 'rect' | 'square' | 'heart'
 export type KeychainSide = 'front' | 'back'
 
 export const KEYCHAIN_SHAPE_IDS: KeychainShape[] = ['rect', 'square', 'heart']
+
+export interface KeychainShapeOption {
+  id: string
+  label: string
+  outline: KeychainShape
+  size: string
+  active: boolean
+}
+
+export const DEFAULT_SHAPE_OPTIONS: KeychainShapeOption[] = [
+  { id: 'rect', label: 'Octagonal', outline: 'rect', size: '3.1 x 4.7 cm', active: true },
+  { id: 'square', label: 'Kotak', outline: 'square', size: '', active: true },
+  { id: 'heart', label: 'Hati', outline: 'heart', size: '', active: true },
+]
+
+// Shape options stored in settings.keychain_shape_options (jsonb). Before that column existed only
+// keychain_shapes (the active outline ids) was stored, so fall back to the defaults with those flags.
+export function shapeOptions(settings: Partial<Settings> | null): KeychainShapeOption[] {
+  const raw = settings?.keychain_shape_options
+  if (Array.isArray(raw)) {
+    const seen = new Set<string>()
+    const options = raw.flatMap(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const o = item as Record<string, unknown>
+      const outline = KEYCHAIN_SHAPE_IDS.find(s => s === o.outline)
+      const id = typeof o.id === 'string' ? o.id.trim().slice(0, 40) : ''
+      if (!outline || !id || seen.has(id)) return []
+      seen.add(id)
+      const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+      return [{ id, outline, label: text(o.label, 40) || SHAPE_LABEL[outline], size: text(o.size, 40), active: o.active !== false }]
+    })
+    if (options.length) return options
+  }
+  const legacy = settings?.keychain_shapes
+  return DEFAULT_SHAPE_OPTIONS.map(o => ({ ...o, active: legacy?.length ? legacy.includes(o.id) : true }))
+}
+
+export function shapeName(shape: KeychainShapeOption) {
+  return shape.size ? `${shape.label} (${shape.size})` : shape.label
+}
 
 export interface SidePhoto {
   file: File
@@ -52,7 +93,7 @@ export type KeychainPhotos = Partial<Record<KeychainSide, SidePhoto>>
 
 // Shape and sides are shared; every keychain has its own photos, so `photos` is always `qty` long.
 export interface KeychainDraft {
-  shape: KeychainShape
+  shape: KeychainShapeOption
   doubleSided: boolean
   qty: number
   photos: KeychainPhotos[]
@@ -67,7 +108,7 @@ export const DEFAULT_CONFIG: ShopConfig = {
   keychainDoublePrice: 10000,
   pickupOptions: ['Ambil di booth Charmera', 'Dikirim (ongkir dikonfirmasi via WhatsApp)'],
   qrisImage: '/assets/qris.png',
-  keychainShapes: KEYCHAIN_SHAPE_IDS,
+  keychainShapes: DEFAULT_SHAPE_OPTIONS,
   whatsappNumber: '',
   instagram: '',
   tiktok: '',
@@ -125,7 +166,7 @@ export function toShopCharm(charm: Charm, fallbackPrice: number, position: numbe
 
 export function toShopConfig(settings: Partial<Settings> | null): ShopConfig {
   if (!settings) return DEFAULT_CONFIG
-  const shapes = KEYCHAIN_SHAPE_IDS.filter(s => settings.keychain_shapes?.includes(s))
+  const shapes = shapeOptions(settings).filter(s => s.active)
   return {
     batchLabel: settings.batch_label || DEFAULT_CONFIG.batchLabel,
     slotCount: settings.slot_count || DEFAULT_CONFIG.slotCount,
@@ -309,8 +350,9 @@ export function keychainMissingMessage(draft: KeychainDraft) {
     : `Upload foto untuk ${missing} keychain lagi${sides} (${draft.qty - missing}/${draft.qty}).`
 }
 
+// Names of the outlines themselves (admin picks one as the base of each shape).
 export const SHAPE_LABEL: Record<KeychainShape, string> = {
-  rect: 'Persegi Panjang',
+  rect: 'Octagonal',
   square: 'Kotak',
   heart: 'Hati',
 }

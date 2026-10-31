@@ -117,6 +117,7 @@ export type Database = {
           pickup_options?: string[] | null
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
+          keychain_shape_options?: Json | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at: string
@@ -135,6 +136,7 @@ export type Database = {
           pickup_options?: string[] | null
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
+          keychain_shape_options?: Json | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at?: string
@@ -153,6 +155,7 @@ export type Database = {
           pickup_options?: string[] | null
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
+          keychain_shape_options?: Json | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at?: string
