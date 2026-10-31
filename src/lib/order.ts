@@ -100,6 +100,18 @@ export function sortCharms<T extends Pick<Charm, 'name' | 'sort_order'>>(charms:
   })
 }
 
+// Cheapest set first; at the same price the one with fewer charms comes first, then fewer bracelets.
+export function sortPackages(packages: Package[]): Package[] {
+  const size = (pkg: Package) => {
+    const c = packageContents(pkg)
+    return [pkg.price, c.charms + c.customCharms, c.bracelets, c.keychains]
+  }
+  return [...packages].sort((a, b) => {
+    const x = size(a), y = size(b)
+    return x.map((v, i) => v - y[i]).find(d => d !== 0) ?? 0
+  })
+}
+
 export function toShopCharm(charm: Charm, fallbackPrice: number, position: number): ShopCharm {
   const image = charm.image_url || (charm.catalog_index ? catalogImage(charm.catalog_index) : null)
   return {

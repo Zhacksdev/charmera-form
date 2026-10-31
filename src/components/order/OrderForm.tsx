@@ -8,7 +8,7 @@ import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generat
 import {
   DEFAULT_CONFIG, FALLBACK_CHARMS, FALLBACK_PACKAGES, SHAPE_LABEL,
   formatRupiah, isKeychainReady, keychainCharge, keychainHasPhoto, keychainMissingMessage, keychainReadyCount, keychainUnitPrice,
-  newOrderCode, packageContents, packageShortfall, resizeBoard, sortCharms, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
+  newOrderCode, packageContents, packageShortfall, resizeBoard, sortCharms, sortPackages, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
 import { renderBoardLayout, renderKeychainSide } from '@/lib/keychain'
@@ -44,7 +44,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function OrderForm() {
   const [loading, setLoading] = useState(true)
-  const [packages, setPackages] = useState<Package[]>(FALLBACK_PACKAGES)
+  const [packages, setPackages] = useState<Package[]>(() => sortPackages(FALLBACK_PACKAGES))
   const [charms, setCharms] = useState<ShopCharm[]>(FALLBACK_CHARMS)
   const [config, setConfig] = useState<ShopConfig>(DEFAULT_CONFIG)
   const [tab, setTab] = useState<Tab>('charm')
@@ -96,7 +96,7 @@ export function OrderForm() {
       setConfig(nextConfig)
       setSlots(Array(nextConfig.slotCount).fill(null))
       setKeychain(k => (nextConfig.keychainShapes.includes(k.shape) ? k : { ...k, shape: nextConfig.keychainShapes[0] }))
-      if (pkgRes.data?.length) setPackages(pkgRes.data)
+      if (pkgRes.data?.length) setPackages(sortPackages(pkgRes.data))
       // Older rows only have emoji; use the photo catalog until charms with images are added.
       const withArt = sortCharms(charmRes.data ?? []).filter(c => c.image_url || c.catalog_index)
       setCharms(
