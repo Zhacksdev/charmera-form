@@ -279,7 +279,8 @@ export function summarizeBracelet(
     includedCustomUsed: includedCustom,
     charmsTotal,
     customTotal,
-    total: pkg ? pkg.price + charmsTotal + customTotal : 0,
+    // Without a set the charms are sold on their own (no bracelet), each at its own price.
+    total: (pkg?.price ?? 0) + charmsTotal + customTotal,
   }
 }
 

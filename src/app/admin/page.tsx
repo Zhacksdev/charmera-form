@@ -219,7 +219,7 @@ function OrderDetails({ order }: { order: Order }) {
             <p className="font-semibold">
               {item.type === 'keychain'
                 ? `Keychain ${SHAPE_LABEL[item.shape as KeychainShape] ?? item.shape}${item.shape_size ? ` (${item.shape_size})` : ''} ${item.double_sided ? 'bolak balik' : 'satu sisi'} × ${item.quantity}`
-                : `Italian Charm (${item.package_name})`}
+                : item.bracelet_count === 0 ? 'Charm satuan (tanpa gelang)' : `Italian Charm (${item.package_name})`}
               {item.subtotal !== undefined && <span className="text-cherry"> · Rp {item.subtotal.toLocaleString('id')}</span>}
             </p>
             {item.layout_url && (

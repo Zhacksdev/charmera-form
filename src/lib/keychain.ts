@@ -224,7 +224,7 @@ async function renderPhoto(box: Box, photo: SidePhoto, outputWidth: number, path
 export type LayoutTile = { src: string | null; framed: boolean; label: string } | null
 
 // A picture of the arranged bracelets (one row per bracelet), so the admin sees exactly how the charms were placed.
-export async function renderBoardLayout(tiles: LayoutTile[], perRow: number, scale = 1.5) {
+export async function renderBoardLayout(tiles: LayoutTile[], perRow: number, rowLabel = 'Gelang', scale = 1.5) {
   const tw = CHARM_TILE_WIDTH * scale
   const th = CHARM_TILE_HEIGHT * scale
   const pad = 24
@@ -247,7 +247,7 @@ export async function renderBoardLayout(tiles: LayoutTile[], perRow: number, sca
       ctx.fillStyle = '#b3262f'
       ctx.font = 'bold 22px sans-serif'
       ctx.textBaseline = 'alphabetic'
-      ctx.fillText(rows > 1 ? `Gelang ${row + 1}` : 'Gelang', pad, y - 10)
+      ctx.fillText(rows > 1 ? `${rowLabel} ${row + 1}` : rowLabel, pad, y - 10)
     }
     const img = images[i]
     if (!tile) {

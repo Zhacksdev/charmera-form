@@ -319,6 +319,9 @@ export function BraceletBuilder({
               ))}
             </div>
           )}
+          {!selected && (
+            <p className="muted hint is-center">Mau charm saja tanpa gelang? Tidak usah pilih set, tiap charm dihitung satuan.</p>
+          )}
           {selected && (
             <div className="package-checklist" aria-live="polite">
               <p className="bubble-title is-small">Isi paket {selected.name}</p>

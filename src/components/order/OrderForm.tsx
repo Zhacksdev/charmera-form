@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import type { Json, OrderInsert, Package } from '@/lib/supabase'
 import { CHARM_TILE_HEIGHT, CHARM_TILE_WIDTH } from '@/lib/charm-catalog.generated'
@@ -128,15 +129,16 @@ export function OrderForm() {
   if (tray.length) shortfall.unshift(`Pasang ${tray.length} charm yang sudah kamu pilih ke gelangnya.`)
 
   const lines: ReceiptLine[] = []
-  if (selectedPackage) {
-    const details = [`Plain Bracelet ${contents.bracelets}x`]
+  if (selectedPackage || hasCharms) {
+    const details = selectedPackage ? [`Plain Bracelet ${contents.bracelets}x`] : []
     if (bracelet.catalogCount) {
       details.push(`Charm Non Custom ${bracelet.catalogCount}x${bracelet.includedUsed ? ` (${bracelet.includedUsed} termasuk set)` : ''}`)
     }
     if (bracelet.customCount) {
       details.push(`Charm Custom ${bracelet.customCount}x${bracelet.includedCustomUsed ? ` (${bracelet.includedCustomUsed} termasuk set)` : ''}`)
     }
-    lines.push({ tab: 'charm', title: `Italian Charm (${selectedPackage.name})`, details, price: bracelet.total })
+    const title = selectedPackage ? `Italian Charm (${selectedPackage.name})` : 'Charm Satuan (tanpa gelang)'
+    lines.push({ tab: 'charm', title, details, price: bracelet.total })
   }
   if (keychainActive) {
     lines.push({
@@ -192,7 +194,6 @@ export function OrderForm() {
   function validate(): CheckoutErrors {
     const next: CheckoutErrors = {}
     if (lines.length === 0 && !hasCharms) next.cart = 'Keranjangmu masih kosong.'
-    else if (hasCharms && !selectedPackage) next.cart = 'Pilih set gelangnya dulu di tab Italian Charm.'
     else if (shortfall.length) next.cart = shortfall[0]
     else if (keychainActive && !isKeychainReady(keychain)) next.cart = keychainMissingMessage(keychain)
     if (!customer.name.trim()) next.name = 'Isi nama kamu.'
@@ -222,7 +223,7 @@ export function OrderForm() {
       const code = newOrderCode()
       const items: Json[] = []
 
-      if (selectedPackage) {
+      if (selectedPackage || hasCharms) {
         const slotItems = await Promise.all(slots.map(async (pick, i) => {
           if (!pick) return null
           // position counts within its bracelet (1..slot_count); bracelet is 1-based.
@@ -246,17 +247,17 @@ export function OrderForm() {
             const charm = charmsById.get(pick.charmId)
             return { src: charm?.image ?? null, framed: false, label: charm?.emoji || charm?.name || 'Charm' }
           })
-          layoutUrl = await uploadOrderFile(code, 'susunan-charm', await renderBoardLayout(tiles, config.slotCount))
+          layoutUrl = await uploadOrderFile(code, 'susunan-charm', await renderBoardLayout(tiles, config.slotCount, selectedPackage ? 'Gelang' : 'Charm satuan'))
         } catch (error) {
           console.warn('Gambar susunan charm gagal dibuat', error)
         }
         items.push({
           type: 'italian_charm',
           layout_url: layoutUrl,
-          package_id: selectedPackage.id,
-          package_name: selectedPackage.name,
-          package_price: selectedPackage.price,
-          bracelet_count: contents.bracelets,
+          package_id: selectedPackage?.id ?? null,
+          package_name: selectedPackage?.name ?? 'Charm satuan',
+          package_price: selectedPackage?.price ?? 0,
+          bracelet_count: selectedPackage ? contents.bracelets : 0,
           included_charms: bracelet.includedUsed,
           included_custom_charms: bracelet.includedCustomUsed,
           slot_count: config.slotCount,
@@ -468,6 +469,7 @@ export function OrderForm() {
           </>
         )}
 
+        <p className="shop-link">Sudah pesan? <Link href="/lacak">Lacak status pesananmu</Link></p>
         <footer className="shop-footer">Snap it. Charm it. Keep it. #WearYourCharmera</footer>
       </div>
 

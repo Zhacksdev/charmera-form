@@ -1,4 +1,5 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import { formatRupiah, whatsappLink } from '@/lib/order'
 import type { ShopConfig } from '@/lib/order'
 
@@ -70,6 +71,7 @@ export function SuccessPanel({ order, config, onStartOver }: {
         <p className="success-warning">Jika syarat di atas tidak dipenuhi, garansi tidak berlaku.</p>
       </div>
 
+      <Link className="pill" href={`/lacak?kode=${encodeURIComponent(order.code)}`}>Lacak status pesanan ini</Link>
       <button type="button" className="btn-primary" onClick={onStartOver}>Buat pesanan baru</button>
     </section>
   )
