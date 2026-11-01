@@ -40,12 +40,14 @@ export interface KeychainShapeOption {
   outline: KeychainShape
   size: string
   active: boolean
+  // Green-screen picture of the keychain; when set it replaces the outline in the mockup.
+  mockup: string | null
 }
 
 export const DEFAULT_SHAPE_OPTIONS: KeychainShapeOption[] = [
-  { id: 'rect', label: 'Octagonal', outline: 'rect', size: '3.1 x 4.7 cm', active: true },
-  { id: 'square', label: 'Kotak', outline: 'square', size: '', active: true },
-  { id: 'heart', label: 'Hati', outline: 'heart', size: '', active: true },
+  { id: 'rect', label: 'Octagonal', outline: 'rect', size: '3.1 x 4.7 cm', active: true, mockup: null },
+  { id: 'square', label: 'Kotak', outline: 'square', size: '', active: true, mockup: null },
+  { id: 'heart', label: 'Hati', outline: 'heart', size: '', active: true, mockup: null },
 ]
 
 // Shape options stored in settings.keychain_shape_options (jsonb). Before that column existed only
@@ -62,7 +64,11 @@ export function shapeOptions(settings: Partial<Settings> | null): KeychainShapeO
       if (!outline || !id || seen.has(id)) return []
       seen.add(id)
       const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
-      return [{ id, outline, label: text(o.label, 40) || SHAPE_LABEL[outline], size: text(o.size, 40), active: o.active !== false }]
+      const mockup = text(o.mockup, 500)
+      return [{
+        id, outline, label: text(o.label, 40) || SHAPE_LABEL[outline], size: text(o.size, 40), active: o.active !== false,
+        mockup: /^(https:\/\/|\/)/.test(mockup) ? mockup : null,
+      }]
     })
     if (options.length) return options
   }
@@ -141,11 +147,12 @@ export function sortCharms<T extends Pick<Charm, 'name' | 'sort_order'>>(charms:
   })
 }
 
-// Cheapest set first; at the same price the one with fewer charms comes first, then fewer bracelets.
+// Special sets (ones that include a custom keychain) always go last. Otherwise the cheapest set first;
+// at the same price the one with fewer charms comes first, then fewer bracelets.
 export function sortPackages(packages: Package[]): Package[] {
   const size = (pkg: Package) => {
     const c = packageContents(pkg)
-    return [pkg.price, c.charms + c.customCharms, c.bracelets, c.keychains]
+    return [c.keychains > 0 ? 1 : 0, pkg.price, c.charms + c.customCharms, c.bracelets, c.keychains]
   }
   return [...packages].sort((a, b) => {
     const x = size(a), y = size(b)

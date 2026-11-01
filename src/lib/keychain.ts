@@ -90,6 +90,114 @@ export function renderKeychainSide(shape: KeychainShape, photo: SidePhoto, outpu
   return renderPhoto(box, photo, outputWidth, path)
 }
 
+// ---------- Green-screen mockups ----------
+// The admin uploads a picture of the keychain whose photo area is painted pure green. The green
+// pixels become the photo window: the customer's photo shows through them, cropped to their bounds.
+
+export interface PreparedMockup {
+  overlay: string // the mockup with the green made transparent (data URL)
+  mask: string // white where the mockup was green, transparent elsewhere (data URL)
+  width: number // in preview units (always KEYCHAIN_VIEWBOX.w wide)
+  height: number
+  box: Box // bounds of the green area, in preview units
+}
+
+// Where a keychain's photo goes: a built-in outline, or the green area of an uploaded mockup.
+export type ShapeGeometry =
+  | { kind: 'outline'; outline: KeychainShape; box: Box; height: number }
+  | { kind: 'mockup'; mockup: PreparedMockup; box: Box; height: number }
+
+export function outlineGeometry(outline: KeychainShape): ShapeGeometry {
+  return { kind: 'outline', outline, box: KEYCHAIN_SHAPES[outline].box, height: KEYCHAIN_VIEWBOX.h }
+}
+
+export function mockupGeometry(mockup: PreparedMockup): ShapeGeometry {
+  return { kind: 'mockup', mockup, box: mockup.box, height: mockup.height }
+}
+
+const MOCKUP_MAX_PX = 1400
+const mockupCache = new Map<string, Promise<PreparedMockup>>()
+
+function isGreen(r: number, g: number, b: number) {
+  return g > 90 && g - r > 50 && g - b > 50
+}
+
+export function prepareMockup(src: string): Promise<PreparedMockup> {
+  let pending = mockupCache.get(src)
+  if (!pending) {
+    pending = buildMockup(src)
+    mockupCache.set(src, pending)
+    pending.catch(() => mockupCache.delete(src))
+  }
+  return pending
+}
+
+async function buildMockup(src: string): Promise<PreparedMockup> {
+  const img = await loadCorsImage(src)
+  const k = Math.min(1, MOCKUP_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight))
+  const w = Math.max(1, Math.round(img.naturalWidth * k))
+  const h = Math.max(1, Math.round(img.naturalHeight * k))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('Browser tidak mendukung canvas')
+  ctx.drawImage(img, 0, 0, w, h)
+  const overlay = ctx.getImageData(0, 0, w, h)
+  const mask = ctx.createImageData(w, h)
+  let minX = w, minY = h, maxX = -1, maxY = -1
+  const d = overlay.data
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128 || !isGreen(d[i], d[i + 1], d[i + 2])) continue
+    d[i + 3] = 0
+    mask.data[i] = mask.data[i + 1] = mask.data[i + 2] = mask.data[i + 3] = 255
+    const p = i / 4, x = p % w, y = (p - x) / w
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  if (maxX < 0) throw new Error('Mockup tidak punya area hijau (green screen) untuk foto.')
+
+  const toUrl = (data: ImageData) => {
+    ctx.putImageData(data, 0, 0)
+    return canvas.toDataURL('image/png')
+  }
+  const unit = KEYCHAIN_VIEWBOX.w / w
+  return {
+    overlay: toUrl(overlay),
+    mask: toUrl(mask),
+    width: KEYCHAIN_VIEWBOX.w,
+    height: h * unit,
+    box: { x: minX * unit, y: minY * unit, w: (maxX - minX + 1) * unit, h: (maxY - minY + 1) * unit },
+  }
+}
+
+// Print file for a mockup shape: the photo cropped to the green area's bounds, transparent outside it.
+export async function renderMockupSide(mockup: PreparedMockup, photo: SidePhoto, outputWidth = 1200) {
+  const { box } = mockup
+  const k = outputWidth / box.w
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(box.w * k)
+  canvas.height = Math.round(box.h * k)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Browser tidak mendukung canvas')
+  const [img, mask] = await Promise.all([loadImage(photo.src), loadImage(mockup.mask)])
+  ctx.scale(k, k)
+  ctx.translate(-box.x, -box.y)
+  const p = photoPlacement(box, photo)
+  ctx.drawImage(img, p.x, p.y, p.w, p.h)
+  ctx.globalCompositeOperation = 'destination-in'
+  ctx.drawImage(mask, 0, 0, mockup.width, mockup.height)
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Gagal menyiapkan foto'))), 'image/png'),
+  )
+}
+
+export async function renderShapeSide(shape: { outline: KeychainShape; mockup: string | null }, photo: SidePhoto) {
+  return shape.mockup ? renderMockupSide(await prepareMockup(shape.mockup), photo) : renderKeychainSide(shape.outline, photo)
+}
+
 export function renderCharmPhoto(photo: SidePhoto, outputWidth = 800) {
   return renderPhoto(CHARM_WINDOW, photo, outputWidth)
 }

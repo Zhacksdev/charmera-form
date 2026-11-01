@@ -208,11 +208,15 @@ export async function createQrisUpload(extension: string): Promise<Result<{ path
   })
 }
 
-// Same signed-URL route for a charm picture; the public URL is stored as the charm's image_url on save.
-export async function createCharmUpload(extension: string): Promise<Result<{ path: string; token: string; url: string }>> {
+// Same signed-URL route for a charm picture or a keychain mockup; the public URL is stored on save.
+export async function createImageUpload(
+  kind: 'charm' | 'mockup',
+  extension: string,
+): Promise<Result<{ path: string; token: string; url: string }>> {
   return guarded(async () => {
     const ext = extension.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'png'
-    const path = `charms/charm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const folder = kind === 'mockup' ? 'keychain-mockups/mockup' : 'charms/charm'
+    const path = `${folder}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
     const { data, error } = await supabaseAdmin.storage.from(UPLOAD_BUCKET).createSignedUploadUrl(path)
     if (error) return fail(error.message)
     const url = supabaseAdmin.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl

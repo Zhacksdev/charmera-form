@@ -1,24 +1,58 @@
 'use client'
 
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { isKeychainPhotoReady, withKeychainQty } from '@/lib/order'
-import type { KeychainDraft, KeychainShape, KeychainShapeOption, KeychainSide, SidePhoto } from '@/lib/order'
-import { KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, newSidePhoto, photoPlacement } from '@/lib/keychain'
+import type { KeychainDraft, KeychainShapeOption, KeychainSide, SidePhoto } from '@/lib/order'
+import {
+  KEYCHAIN_RING, KEYCHAIN_SHAPES, KEYCHAIN_VIEWBOX, MAX_ZOOM, clampOffset, loadImage, mockupGeometry, newSidePhoto, outlineGeometry,
+  photoPlacement, prepareMockup,
+} from '@/lib/keychain'
+import type { PreparedMockup, ShapeGeometry } from '@/lib/keychain'
 import { validateImage } from '@/lib/uploads'
 import { Chevron, Stepper } from './parts'
 
 const SIDE_LABEL: Record<KeychainSide, string> = { front: 'Sisi depan', back: 'Sisi belakang' }
 
 // Ring, shape and photo of one keychain side; `children` is drawn over the photo, under the outline.
-function KeychainArt({ shape, photo, clipId, children }: {
-  shape: KeychainShape
+// A mockup shape draws the photo through the mockup's green area instead.
+function KeychainArt({ geometry, photo, clipId, children }: {
+  geometry: ShapeGeometry
   photo: SidePhoto | undefined
   clipId: string
   children?: React.ReactNode
 }) {
-  const { path, box, top } = KEYCHAIN_SHAPES[shape]
-  const placement = photo ? photoPlacement(box, photo) : null
+  const placement = photo ? photoPlacement(geometry.box, photo) : null
+  const photoImage = (clip: string) => photo && placement && (
+    <image
+      href={photo.src}
+      x={placement.x}
+      y={placement.y}
+      width={placement.w}
+      height={placement.h}
+      preserveAspectRatio="none"
+      {...(geometry.kind === 'mockup' ? { mask: clip } : { clipPath: clip })}
+    />
+  )
+
+  if (geometry.kind === 'mockup') {
+    const { mockup } = geometry
+    return (
+      <>
+        <defs>
+          <mask id={clipId} maskUnits="userSpaceOnUse" x={0} y={0} width={mockup.width} height={mockup.height}>
+            <image href={mockup.mask} x={0} y={0} width={mockup.width} height={mockup.height} />
+          </mask>
+        </defs>
+        <image href={mockup.mask} x={0} y={0} width={mockup.width} height={mockup.height} opacity={photo ? 0 : 1} />
+        {photoImage(`url(#${clipId})`)}
+        <image href={mockup.overlay} x={0} y={0} width={mockup.width} height={mockup.height} pointerEvents="none" />
+        {children}
+      </>
+    )
+  }
+
+  const { path, top } = KEYCHAIN_SHAPES[geometry.outline]
   const ringBottom = KEYCHAIN_RING.cy + KEYCHAIN_RING.r
   return (
     <>
@@ -32,21 +66,26 @@ function KeychainArt({ shape, photo, clipId, children }: {
         <line x1={KEYCHAIN_RING.cx} y1={ringBottom} x2={KEYCHAIN_RING.cx} y2={top} stroke="var(--cherry)" strokeWidth={6} />
       )}
       <path d={path} fill="#FFF8EE" />
-      {photo && placement && (
-        <image
-          href={photo.src}
-          x={placement.x}
-          y={placement.y}
-          width={placement.w}
-          height={placement.h}
-          preserveAspectRatio="none"
-          clipPath={`url(#${clipId})`}
-        />
-      )}
+      {photoImage(`url(#${clipId})`)}
       {children}
       <path d={path} fill="none" stroke="var(--cherry)" strokeWidth={7} strokeLinejoin="round" />
     </>
   )
+}
+
+// The outline right away, swapped for the mockup once its green area has been read.
+function useShapeGeometry(shape: KeychainShapeOption) {
+  const [prepared, setPrepared] = useState<{ src: string; mockup: PreparedMockup } | null>(null)
+  useEffect(() => {
+    if (!shape.mockup) return
+    let alive = true
+    const src = shape.mockup
+    prepareMockup(src)
+      .then(mockup => { if (alive) setPrepared({ src, mockup }) })
+      .catch(error => console.warn('Mockup keychain tidak bisa dipakai', error))
+    return () => { alive = false }
+  }, [shape.mockup])
+  return prepared && prepared.src === shape.mockup ? mockupGeometry(prepared.mockup) : outlineGeometry(shape.outline)
 }
 
 // `embedded` renders just the designer and quantity, for a keychain that comes with a set.
@@ -72,7 +111,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   const current = Math.max(0, Math.min(index, draft.qty - 1))
   const activeSide: KeychainSide = draft.doubleSided ? side : 'front'
   const photo = draft.photos[current]?.[activeSide]
-  const shape = KEYCHAIN_SHAPES[draft.shape.outline]
+  const geometry = useShapeGeometry(draft.shape)
   const zoomFill = photo ? ((photo.zoom - 1) / (MAX_ZOOM - 1)) * 100 : 0
 
   function setCurrentPhoto(next: SidePhoto) {
@@ -83,7 +122,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
   function updatePhoto(patch: Partial<SidePhoto>) {
     if (!photo) return
     const next = { ...photo, ...patch }
-    setCurrentPhoto({ ...next, ...clampOffset(shape.box, next, next.dx, next.dy) })
+    setCurrentPhoto({ ...next, ...clampOffset(geometry.box, next, next.dx, next.dy) })
   }
 
   function setQty(qty: number) {
@@ -143,7 +182,8 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
     onChange({ ...draft, shape: next, photos })
   }
 
-  const { box } = shape
+  const { box } = geometry
+  const viewBox = `0 0 ${KEYCHAIN_VIEWBOX.w} ${geometry.height}`
   const many = draft.qty > 1
 
   const stage = (
@@ -200,7 +240,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
         <svg
           ref={svgRef}
           className={`keychain-svg ${photo ? 'has-photo' : ''}`}
-          viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`}
+          viewBox={viewBox}
           role="img"
           aria-label={`Preview keychain ${current + 1} ${draft.shape.label}, ${SIDE_LABEL[activeSide].toLowerCase()}`}
           onPointerDown={handlePointerDown}
@@ -212,7 +252,7 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
             else if (!photo) fileRef.current?.click()
           }}
         >
-          <KeychainArt shape={draft.shape.outline} photo={photo} clipId={clipId}>
+          <KeychainArt geometry={geometry} photo={photo} clipId={clipId}>
             {locked && (
               <g>
                 <text x={box.x + box.w / 2} y={box.y + box.h / 2 - 6} textAnchor="middle" fontSize={30}>🔒</text>
@@ -293,8 +333,8 @@ export function KeychainBuilder({ draft, shapes, onChange, notify, aside, minQty
                 aria-label={`Keychain ${i + 1}${ready ? ', foto lengkap' : ', foto belum lengkap'}`}
                 onClick={() => goToKeychain(i)}
               >
-                <svg viewBox={`0 0 ${KEYCHAIN_VIEWBOX.w} ${KEYCHAIN_VIEWBOX.h}`} aria-hidden="true">
-                  <KeychainArt shape={draft.shape.outline} photo={sides.front} clipId={`${clipId}-${i}`} />
+                <svg viewBox={viewBox} aria-hidden="true">
+                  <KeychainArt geometry={geometry} photo={sides.front} clipId={`${clipId}-${i}`} />
                 </svg>
                 <span className="keychain-thumb-label" aria-hidden="true">{ready ? '✓' : i + 1}</span>
               </button>

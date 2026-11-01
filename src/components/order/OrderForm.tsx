@@ -11,7 +11,7 @@ import {
   newOrderCode, packageContents, packageShortfall, resizeBoard, sortCharms, sortPackages, summarizeBracelet, toShopCharm, toShopConfig, withKeychainQty,
 } from '@/lib/order'
 import type { CharmPick, KeychainDraft, ShopCharm, ShopConfig, Tab } from '@/lib/order'
-import { renderBoardLayout, renderKeychainSide } from '@/lib/keychain'
+import { renderBoardLayout, renderShapeSide } from '@/lib/keychain'
 import type { LayoutTile } from '@/lib/keychain'
 import { uploadOrderFile, validateImage } from '@/lib/uploads'
 import { BraceletBuilder } from './BraceletBuilder'
@@ -275,7 +275,7 @@ export function OrderForm() {
             const photo = photos[side]!
             const name = `keychain-${k + 1}-${side}`
             const [print, original] = await Promise.all([
-              renderKeychainSide(keychain.shape.outline, photo).then(blob => uploadOrderFile(code, name, blob)),
+              renderShapeSide(keychain.shape, photo).then(blob => uploadOrderFile(code, name, blob)),
               uploadOrderFile(code, `${name}-original`, photo.file),
             ])
             return { side, print_url: print, original_url: original, zoom: photo.zoom }

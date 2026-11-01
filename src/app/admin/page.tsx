@@ -6,8 +6,9 @@ import { supabase, UPLOAD_BUCKET } from '@/lib/supabase'
 import type { Charm, Order, Package, Settings } from '@/lib/supabase'
 import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems, shapeOptions } from '@/lib/order'
 import type { KeychainShape, KeychainShapeOption } from '@/lib/order'
+import { prepareMockup } from '@/lib/keychain'
 import {
-  createCharmUpload, createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
+  createImageUpload, createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
   saveCharm, saveGeneralSettings, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
 } from './actions'
 import type { Result } from './actions'
@@ -451,13 +452,41 @@ export default function AdminPage() {
     setEditingCharm(null)
   }
 
+  // Checks the mockup has a green-screen area, then uploads it; it is kept once settings are saved.
+  async function uploadMockup(index: number, file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setNotice({ type: 'error', text: 'Mockup harus berupa gambar.' })
+    if (file.size > MAX_QR_BYTES) return setNotice({ type: 'error', text: 'Ukuran mockup maksimal 5 MB.' })
+    setBusy(true)
+    const local = URL.createObjectURL(file)
+    try {
+      await prepareMockup(local)
+      const ticket = await createImageUpload('mockup', file.name.split('.').pop() ?? 'png')
+      if (!show(ticket) || !ticket.ok) return
+      const { error } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .uploadToSignedUrl(ticket.data.path, ticket.data.token, file, { contentType: file.type })
+      if (error) return setNotice({ type: 'error', text: `Upload gagal: ${error.message}` })
+      setGeneral(prev => ({
+        ...prev,
+        keychain_shape_options: prev.keychain_shape_options.map((s, i) => (i === index ? { ...s, mockup: ticket.data.url } : s)),
+      }))
+      setNotice({ type: 'ok', text: 'Mockup diupload. Klik Simpan pengaturan supaya dipakai di form.' })
+    } catch (error) {
+      setNotice({ type: 'error', text: error instanceof Error ? error.message : 'Mockup tidak bisa dibaca.' })
+    } finally {
+      URL.revokeObjectURL(local)
+      setBusy(false)
+    }
+  }
+
   async function handleSaveCharm() {
     if (!editingCharm) return
     let charm = editingCharm
     if (charmFile) {
       setBusy(true)
       try {
-        const ticket = await createCharmUpload(charmFile.name.split('.').pop() ?? 'png')
+        const ticket = await createImageUpload('charm', charmFile.name.split('.').pop() ?? 'png')
         if (!show(ticket) || !ticket.ok) return
         const { error } = await supabase.storage
           .from(UPLOAD_BUCKET)
@@ -1450,6 +1479,32 @@ export default function AdminPage() {
                         >
                           Hapus
                         </button>
+                        <div className="flex items-center gap-3 sm:col-span-5">
+                          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-line bg-card flex items-center justify-center text-[10px] text-char/50 text-center">
+                            {shape.mockup ? <img src={shape.mockup} alt={`Mockup ${shape.label}`} className="h-full w-full object-contain" /> : 'Pakai outline'}
+                          </div>
+                          <div className="text-xs text-char/60">
+                            <label className={`${secondaryButton} cursor-pointer inline-block text-sm`}>
+                              {shape.mockup ? 'Ganti mockup' : 'Upload mockup'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={busy}
+                                onChange={e => {
+                                  uploadMockup(index, e.target.files?.[0])
+                                  e.target.value = ''
+                                }}
+                              />
+                            </label>
+                            {shape.mockup && (
+                              <button type="button" onClick={() => patch({ mockup: null })} className="ml-3 font-semibold text-cherry underline">
+                                Hapus mockup
+                              </button>
+                            )}
+                            <p className="mt-1">Area foto diwarnai hijau penuh (green screen, mis. #00FF00). Foto pelanggan tampil di area hijau itu.</p>
+                          </div>
+                        </div>
                       </div>
                     )
                   })}
@@ -1460,7 +1515,7 @@ export default function AdminPage() {
                     ...prev,
                     keychain_shape_options: [
                       ...prev.keychain_shape_options,
-                      { id: `shape-${Date.now().toString(36)}`, label: '', outline: 'rect', size: '', active: true },
+                      { id: `shape-${Date.now().toString(36)}`, label: '', outline: 'rect', size: '', active: true, mockup: null },
                     ],
                   }))}
                   className={`${secondaryButton} mt-2`}
