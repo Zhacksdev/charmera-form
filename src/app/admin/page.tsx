@@ -7,9 +7,10 @@ import type { Charm, Order, Package, Settings } from '@/lib/supabase'
 import { DEFAULT_CONFIG, KEYCHAIN_SHAPE_IDS, ORDER_STATUSES, SHAPE_LABEL, packageItems, shapeOptions } from '@/lib/order'
 import type { KeychainShape, KeychainShapeOption } from '@/lib/order'
 import { prepareMockup } from '@/lib/keychain'
+import { FinanceDashboard } from './FinanceDashboard'
 import {
   createImageUpload, createQrisUpload, deleteCharm, deleteOrder, deletePackage, hasSession, importDefaultCatalog, importOrders, loadAdminData, login, logout,
-  saveCharm, saveGeneralSettings, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
+  saveCharm, saveGeneralSettings, saveStock, saveOrder, savePackage, savePrices, setQrisImage, updateOrderStatus,
 } from './actions'
 import type { Result } from './actions'
 import { csvToOrders, orderTemplateCsv, ordersToCsv } from './orders-csv'
@@ -84,8 +85,9 @@ function PackageContentsEditor({ pkg, onChange }: { pkg: Partial<Package>; onCha
 
 const MAX_QR_BYTES = 5 * 1024 * 1024
 
-type Tab = 'orders' | 'prices' | 'packages' | 'charms' | 'settings'
+type Tab = 'dashboard' | 'orders' | 'prices' | 'packages' | 'charms' | 'settings'
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'dashboard', label: 'Analisa' },
   { id: 'orders', label: 'Pesanan' },
   { id: 'prices', label: 'Harga' },
   { id: 'packages', label: 'Paket' },
@@ -268,7 +270,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
-  const [tab, setTab] = useState<Tab>('orders')
+  const [tab, setTab] = useState<Tab>('dashboard')
 
   const [settings, setSettings] = useState<Settings | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
@@ -676,6 +678,19 @@ export default function AdminPage() {
       </nav>
 
       <main className="max-w-6xl mx-auto p-4 md:p-6">
+        {tab === 'dashboard' && (
+          <FinanceDashboard
+            orders={orders}
+            charms={charms}
+            settings={settings}
+            busy={busy}
+            onSaveStock={async update => {
+              const ok = await run(() => saveStock(update), 'Stok disimpan.')
+              if (ok) await refresh()
+              return Boolean(ok)
+            }}
+          />
+        )}
         {tab === 'orders' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

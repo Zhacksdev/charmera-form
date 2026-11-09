@@ -33,6 +33,9 @@ alter table charms add column if not exists image_url text;
 alter table charms add column if not exists catalog_index integer;
 alter table charms add column if not exists price integer;
 alter table charms alter column emoji set default '';
+-- Stock on hand when last counted (null = not tracked); orders after stock_updated_at are subtracted from it.
+alter table charms add column if not exists stock integer;
+alter table charms add column if not exists stock_updated_at timestamptz;
 
 create table if not exists settings (
   id integer primary key default 1,
@@ -56,6 +59,12 @@ alter table settings add column if not exists keychain_shape_options jsonb;
 -- Shown on the thank-you page (warranty terms), without the leading @.
 alter table settings add column if not exists instagram_username text;
 alter table settings add column if not exists tiktok_username text;
+-- Stock of plain bracelets and blank links for custom photo charms, counted like charms.stock.
+-- Keychain stock lives in keychain_shape_options (stock, stock_at per shape).
+alter table settings add column if not exists stock_bracelets integer;
+alter table settings add column if not exists stock_bracelets_at timestamptz;
+alter table settings add column if not exists stock_custom_charms integer;
+alter table settings add column if not exists stock_custom_charms_at timestamptz;
 insert into settings (id) values (1) on conflict (id) do nothing;
 
 create table if not exists orders (

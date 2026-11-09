@@ -262,6 +262,37 @@ export async function deletePackage(id: string): Promise<Result> {
   })
 }
 
+// Only the counts that changed are sent; each one restarts its "used since" clock at now.
+export interface StockUpdate {
+  bracelets?: number | null
+  customCharms?: number | null
+  charms?: { id: string; stock: number | null }[]
+  shapes?: { id: string; stock: number | null }[]
+}
+
+export async function saveStock(update: StockUpdate): Promise<Result> {
+  return guarded(async () => {
+    const now = new Date().toISOString()
+    const count = (value: number | null | undefined) => (value === null || value === undefined ? null : price(value))
+    const settingsPatch: Partial<Settings> = {}
+    if (update.bracelets !== undefined) Object.assign(settingsPatch, { stock_bracelets: count(update.bracelets), stock_bracelets_at: now })
+    if (update.customCharms !== undefined) Object.assign(settingsPatch, { stock_custom_charms: count(update.customCharms), stock_custom_charms_at: now })
+    if (update.shapes?.length) {
+      const { data, error } = await supabaseAdmin.from('settings').select('keychain_shapes, keychain_shape_options').eq('id', 1).maybeSingle()
+      if (error) return fail(error.message)
+      const changes = new Map(update.shapes.map(s => [s.id, count(s.stock)]))
+      const shapes = shapeOptions(data).map(s => (changes.has(s.id) ? { ...s, stock: changes.get(s.id) ?? null, stock_at: now } : s))
+      settingsPatch.keychain_shape_options = shapes as unknown as Json
+    }
+    const results = await Promise.all([
+      Object.keys(settingsPatch).length ? supabaseAdmin.from('settings').update(settingsPatch).eq('id', 1) : null,
+      ...(update.charms ?? []).map(c => supabaseAdmin.from('charms').update({ stock: count(c.stock), stock_updated_at: now }).eq('id', c.id)),
+    ])
+    const failed = results.find(r => r?.error)
+    return failed?.error ? fail(failed.error.message) : { ok: true, data: null }
+  })
+}
+
 export async function saveCharm(charm: Partial<Charm>): Promise<Result> {
   return guarded(async () => {
     if (!(charm.emoji || charm.image_url || charm.catalog_index)) return fail('Isi gambar, nomor katalog, atau emoji.')

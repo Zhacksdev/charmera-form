@@ -42,6 +42,9 @@ export interface KeychainShapeOption {
   active: boolean
   // Green-screen picture of the keychain; when set it replaces the outline in the mockup.
   mockup: string | null
+  // Blank keychains on hand when last counted (null = not tracked), and when that was.
+  stock?: number | null
+  stock_at?: string | null
 }
 
 export const DEFAULT_SHAPE_OPTIONS: KeychainShapeOption[] = [
@@ -68,6 +71,8 @@ export function shapeOptions(settings: Partial<Settings> | null): KeychainShapeO
       return [{
         id, outline, label: text(o.label, 40) || SHAPE_LABEL[outline], size: text(o.size, 40), active: o.active !== false,
         mockup: /^(https:\/\/|\/)/.test(mockup) ? mockup : null,
+        stock: typeof o.stock === 'number' && Number.isFinite(o.stock) ? Math.max(0, Math.round(o.stock)) : null,
+        stock_at: typeof o.stock_at === 'string' ? o.stock_at : null,
       }]
     })
     if (options.length) return options

@@ -286,6 +286,7 @@ export function OrderForm() {
         items.push({
           type: 'keychain',
           shape: keychain.shape.label,
+          shape_id: keychain.shape.id,
           shape_size: keychain.shape.size || null,
           outline: keychain.shape.outline,
           double_sided: keychain.doubleSided,

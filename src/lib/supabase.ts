@@ -79,6 +79,8 @@ export type Database = {
           is_active: boolean
           sort_order: number
           created_at: string
+          stock?: number | null
+          stock_updated_at?: string | null
         }
         Insert: {
           id?: string
@@ -90,6 +92,8 @@ export type Database = {
           is_active?: boolean
           sort_order?: number
           created_at?: string
+          stock?: number | null
+          stock_updated_at?: string | null
         }
         Update: {
           id?: string
@@ -101,6 +105,8 @@ export type Database = {
           is_active?: boolean
           sort_order?: number
           created_at?: string
+          stock?: number | null
+          stock_updated_at?: string | null
         }
       }
       settings: {
@@ -118,6 +124,10 @@ export type Database = {
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
           keychain_shape_options?: Json | null
+          stock_bracelets?: number | null
+          stock_bracelets_at?: string | null
+          stock_custom_charms?: number | null
+          stock_custom_charms_at?: string | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at: string
@@ -137,6 +147,10 @@ export type Database = {
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
           keychain_shape_options?: Json | null
+          stock_bracelets?: number | null
+          stock_bracelets_at?: string | null
+          stock_custom_charms?: number | null
+          stock_custom_charms_at?: string | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at?: string
@@ -156,6 +170,10 @@ export type Database = {
           qris_image_url?: string | null
           keychain_shapes?: string[] | null
           keychain_shape_options?: Json | null
+          stock_bracelets?: number | null
+          stock_bracelets_at?: string | null
+          stock_custom_charms?: number | null
+          stock_custom_charms_at?: string | null
           instagram_username?: string | null
           tiktok_username?: string | null
           created_at?: string
